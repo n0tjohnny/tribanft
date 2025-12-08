@@ -1,3 +1,21 @@
+"""
+TribanFT Failed Login Detector
+
+Detects brute force attacks through failed login attempts.
+
+Attack pattern:
+Attackers attempt multiple authentication failures to gain unauthorized access
+through credential guessing or dictionary attacks.
+
+Detection logic:
+- Counts failed login events per IP within time window
+- Triggers when threshold exceeded (default: 20 events in 7 days)
+- High confidence - strong indicator of brute force attack
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
 from typing import List
 from datetime import datetime
 import ipaddress
@@ -7,16 +25,39 @@ from .base import BaseDetector
 from ..models import SecurityEvent, DetectionResult, DetectionConfidence, EventType
 from ..config import get_config
 
+
 class FailedLoginDetector(BaseDetector):
     """Detects failed login attempts from MSSQL logs"""
     
     def __init__(self, whitelist_manager):
+        """
+        Initialize failed login detector.
+        
+        Args:
+            whitelist_manager: WhitelistManager for filtering trusted IPs
+        """
         super().__init__("failed_login_detector", whitelist_manager)
         self.config = get_config()
         self.enabled = self.config.enable_failed_login_detection
         self.logger = logging.getLogger(__name__)
     
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
+        """
+        Analyze events and identify failed login brute force attacks.
+        
+        Process:
+        1. Filter for failed login events
+        2. Remove whitelisted IPs
+        3. Apply time window filtering
+        4. Group by IP and count events
+        5. Create DetectionResult for IPs exceeding threshold
+        
+        Args:
+            events: List of SecurityEvent objects from log parsers
+            
+        Returns:
+            List of DetectionResult objects for detected threats
+        """
         if not self.enabled:
             return []
         

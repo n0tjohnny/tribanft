@@ -1,6 +1,19 @@
-#!/usr/bin/env python3
 """
-OTIMIZADO: Auto-carrega caches CSV/JSON existentes
+TribanFT IPInfo Batch Manager
+
+Batch geolocation processing with caching and rate limiting.
+
+Manages bulk geolocation lookups for blacklist IPs using IPInfo.io API.
+Features:
+- Auto-loads existing CSV/JSON caches
+- Rate limiting (1000/day, 15/minute)
+- Persistent caching to minimize API calls
+- Batch processing with priority for cached data
+
+Used as systemd service for background geolocation enrichment.
+
+Author: TribanFT Project
+License: GNU GPL v3
 """
 
 import json
@@ -17,9 +30,10 @@ from bruteforce_detector.managers.blacklist_writer import BlacklistWriter
 
 
 class IPInfoBatchManager:
-    """Gerenciador otimizado com auto-load de caches"""
+    """Optimized batch manager with auto-load caches"""
     
     def __init__(self, config, api_token: Optional[str] = None):
+        """Initialize batch manager with config and API token."""
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.blacklist_writer = BlacklistWriter(config)
@@ -37,21 +51,21 @@ class IPInfoBatchManager:
         self.results_file = Path("/root/projeto-ip-info-results.json")
         self.stats_file = self.cache_dir / "ipinfo_stats.json"
         
-        # Cache - carrega automaticamente
+        # Auto-load caches
         self.cache = self._load_all_caches()
         self.stats = self._load_stats()
         
-        # Rate limiting
+        # Rate limiting state
         self.requests_this_minute = 0
         self.minute_window_start = datetime.now()
         self.requests_today = self.stats.get('requests_today', 0)
         self.last_reset_date = self.stats.get('last_reset_date', datetime.now().date().isoformat())
     
     def _load_all_caches(self) -> Dict[str, Dict]:
-        """Carrega TODOS os caches disponíveis (JSON + CSV)"""
+        """Load all available caches (JSON + CSV)."""
         cache = {}
         
-        # 1. Cache JSON principal
+        # JSON cache
         if self.results_file.exists():
             try:
                 with open(self.results_file, 'r', encoding='utf-8') as f:
@@ -61,7 +75,7 @@ class IPInfoBatchManager:
             except Exception as e:
                 self.logger.warning(f"JSON cache error: {e}")
         
-        # 2. Cache CSV legado
+        # Legacy CSV cache
         csv_file = Path("/root/projeto-ip-info-results-portscanners-ip4.csv")
         if csv_file.exists():
             try:
@@ -81,7 +95,7 @@ class IPInfoBatchManager:
         return cache
     
     def _csv_to_ipinfo_format(self, row: Dict) -> Dict:
-        """Converte CSV para formato ipinfo.io"""
+        """Convert CSV row to IPInfo format."""
         return {
             'ip': row.get('query') or row.get('ip'),
             'country': row.get('country'),
@@ -95,6 +109,7 @@ class IPInfoBatchManager:
         }
     
     def _load_token(self) -> Optional[str]:
+        """Load API token from file."""
         token_file = Path("/etc/tribanft/ipinfo_token.txt")
         if token_file.exists():
             try:
@@ -104,6 +119,7 @@ class IPInfoBatchManager:
         return None
     
     def _load_stats(self) -> Dict[str, Any]:
+        """Load statistics from file."""
         if self.stats_file.exists():
             try:
                 with open(self.stats_file, 'r') as f:
@@ -119,31 +135,29 @@ class IPInfoBatchManager:
             'api_calls': 0
         }
     
-    def _save_stats(self):
-        try:
-            with open(self.stats_file, 'w') as f:
-                json.dump(self.stats, f, indent=2)
-        except Exception as e:
-            self.logger.error(f"Save stats error: {e}")
-    
     def _check_rate_limits(self) -> bool:
+        """Check and enforce rate limits."""
         now = datetime.now()
         today = now.date().isoformat()
         
+        # Daily reset
         if today != self.last_reset_date:
             self.requests_today = 0
             self.last_reset_date = today
             self.stats['requests_today'] = 0
             self.stats['last_reset_date'] = today
         
+        # Daily limit
         if self.requests_today >= self.daily_limit:
-            self.logger.warning(f"⚠️  Limite diário: {self.daily_limit}")
+            self.logger.warning(f"⚠️  Daily limit: {self.daily_limit}")
             return False
         
+        # Minute window
         if (now - self.minute_window_start).total_seconds() >= 60:
             self.requests_this_minute = 0
             self.minute_window_start = now
         
+        # Per-minute limit
         if self.requests_this_minute >= self.rate_limit_per_minute:
             wait = 60 - (now - self.minute_window_start).total_seconds()
             if wait > 0:
@@ -154,7 +168,7 @@ class IPInfoBatchManager:
         return True
     
     def get_ip_info(self, ip_str: str, use_cache: bool = True) -> Optional[Dict]:
-        """Obtém info com cache prioritário"""
+        """Get IP info with cache priority."""
         if use_cache and ip_str in self.cache:
             self.stats['cache_hits'] = self.stats.get('cache_hits', 0) + 1
             return self.cache[ip_str]
@@ -186,58 +200,27 @@ class IPInfoBatchManager:
                 
                 return data
             elif response.status_code == 429:
-                self.logger.warning(f"⚠️  Rate limit 429")
+                self.logger.warning("⚠️  Rate limit 429")
                 time.sleep(60)
                 self.requests_today = self.daily_limit
                 return None
-            else:
-                self.logger.warning(f"HTTP {response.status_code}")
-                return None
         except Exception as e:
             self.logger.error(f"Request error: {e}")
-            return None
-    
-    def _save_results(self):
-        """Salva cache JSON"""
-        try:
-            if self.results_file.exists():
-                backup = Path(str(self.results_file) + '.backup')
-                self.results_file.rename(backup)
-            
-            with open(self.results_file, 'w', encoding='utf-8') as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-            
-            backup = Path(str(self.results_file) + '.backup')
-            if backup.exists():
-                backup.unlink()
-        except Exception as e:
-            self.logger.error(f"Save error: {e}")
-    
-    def _normalize_ipinfo_response(self, data: Dict) -> Dict:
-        """Normaliza para formato IP-API"""
-        loc = data.get('loc', ',').split(',')
-        return {
-            'country': data.get('country'),
-            'city': data.get('city'),
-            'isp': data.get('org', '').split()[0] if data.get('org') else None,
-            'org': data.get('org'),
-            'lat': loc[0] if len(loc) > 0 else None,
-            'lon': loc[1] if len(loc) > 1 else None
-        }
+        
+        return None
     
     def process_blacklist_batch(self, max_requests: int = 100) -> int:
-        """Processa batch com cache prioritário"""
-        self.logger.info("🔍 Processando blacklist...")
+        """Process blacklist with cache priority."""
+        self.logger.info("🔍 Processing blacklist...")
         
         blacklist_path = Path(self.config.blacklist_ipv4_file)
         if not blacklist_path.exists():
-            self.logger.warning("⚠️  Blacklist não encontrado")
+            self.logger.warning("⚠️  Blacklist not found")
             return 0
         
-        # Lê usando BlacklistWriter
         existing = self.blacklist_writer.read_blacklist(str(blacklist_path))
         
-        # IPs sem geo
+        # Find IPs without geo
         ips_without_geo = []
         for ip_str, info in existing.items():
             try:
@@ -250,22 +233,20 @@ class IPInfoBatchManager:
                 ips_without_geo.append(ip_str)
         
         if not ips_without_geo:
-            self.logger.info("✅ Todos IPs têm geo")
+            self.logger.info("✅ All IPs have geo")
             return 0
         
-        self.logger.info(f"📋 {len(ips_without_geo)} IPs sem geo")
+        self.logger.info(f"📋 {len(ips_without_geo)} IPs without geo")
         
-        # Prioriza cache
-        from_cache = 0
-        from_api = 0
+        # Process with cache priority
+        from_cache = from_api = 0
         ips_to_update = {}
         
         for ip_str in ips_without_geo:
-            # Cache hit?
+            # Cache hit
             if ip_str in self.cache:
                 full_data = self.cache[ip_str]
                 normalized = self._normalize_ipinfo_response(full_data)
-                
                 ips_to_update[ip_str] = {
                     **existing[ip_str],
                     'geolocation': {
@@ -276,10 +257,10 @@ class IPInfoBatchManager:
                 }
                 from_cache += 1
             
-            # API call (se dentro do limite)
+            # API call (if under limit)
             elif from_api < max_requests:
                 if not self._check_rate_limits():
-                    continue  # Pula API mas continua cache
+                    continue
                 
                 full_data = self.get_ip_info(ip_str, use_cache=False)
                 if full_data:
@@ -296,20 +277,53 @@ class IPInfoBatchManager:
         
         self.logger.info(f"💾 Cache: {from_cache} | 🌐 API: {from_api}")
         
-        # Salva usando BlacklistWriter
+        # Save updates
         if ips_to_update:
             existing.update(ips_to_update)
-            self.blacklist_writer.write_blacklist(
-                str(blacklist_path),
-                existing,
-                len(ips_to_update)
-            )
+            self.blacklist_writer.write_blacklist(str(blacklist_path), existing, len(ips_to_update))
             self._save_results()
             self._save_stats()
         
         return len(ips_to_update)
     
+    def _normalize_ipinfo_response(self, data: Dict) -> Dict:
+        """Normalize to IP-API format."""
+        loc = data.get('loc', ',').split(',')
+        return {
+            'country': data.get('country'),
+            'city': data.get('city'),
+            'isp': data.get('org', '').split()[0] if data.get('org') else None,
+            'org': data.get('org'),
+            'lat': loc[0] if len(loc) > 0 else None,
+            'lon': loc[1] if len(loc) > 1 else None
+        }
+    
+    def _save_results(self):
+        """Save cache to JSON."""
+        try:
+            if self.results_file.exists():
+                backup = Path(str(self.results_file) + '.backup')
+                self.results_file.rename(backup)
+            
+            with open(self.results_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, indent=2, ensure_ascii=False)
+            
+            backup = Path(str(self.results_file) + '.backup')
+            if backup.exists():
+                backup.unlink()
+        except Exception as e:
+            self.logger.error(f"Save error: {e}")
+    
+    def _save_stats(self):
+        """Save statistics to file."""
+        try:
+            with open(self.stats_file, 'w') as f:
+                json.dump(self.stats, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Save stats error: {e}")
+    
     def get_stats_summary(self) -> Dict[str, Any]:
+        """Get statistics summary."""
         remaining = max(0, self.daily_limit - self.requests_today)
         return {
             'requests_today': self.requests_today,
@@ -319,14 +333,3 @@ class IPInfoBatchManager:
             'cache_hits': self.stats.get('cache_hits', 0),
             'api_calls': self.stats.get('api_calls', 0)
         }
-    
-    def print_stats(self):
-        stats = self.get_stats_summary()
-        print(f"\n{'='*70}")
-        print("📊 ESTATÍSTICAS - IPINFO.IO")
-        print(f"{'='*70}")
-        print(f"📈 Hoje:        {stats['requests_today']}/{stats['daily_limit']}")
-        print(f"💾 Cache:       {stats['cache_size']} IPs")
-        print(f"🎯 Cache hits:  {stats['cache_hits']}")
-        print(f"🌐 API calls:   {stats['api_calls']}")
-        print(f"{'='*70}\n")

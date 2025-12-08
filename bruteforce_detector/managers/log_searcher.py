@@ -1,7 +1,22 @@
 """
-bruteforce_detector/managers/log_searcher.py
+TribanFT Log Searcher
 
-Módulo responsável por buscar atividades de IPs nos logs do sistema
+Searches system logs for IP activity and suspicious patterns.
+
+Analyzes logs to find:
+- Port scanning activity
+- Brute force attempts (failed logins, prelogin patterns)
+- Suspicious activity patterns
+- MSSQL-specific security events
+
+Searches multiple sources:
+- Syslog (/var/log/syslog) including rotated logs
+- MSSQL errorlog
+- Auth logs
+- Compressed archives (.gz files)
+
+Author: TribanFT Project
+License: GNU GPL v3
 """
 
 from typing import List, Dict, Tuple
@@ -14,20 +29,21 @@ import glob
 
 
 class LogSearcher:
-    """Busca atividades maliciosas de IPs nos logs do sistema"""
+    """Searches for malicious IP activity in system logs"""
     
     def __init__(self, config):
+        """Initialize log searcher with configuration and threat patterns."""
         self.config = config
         self.logger = logging.getLogger(__name__)
         
-        # Padrões de port scan
+        # Port scan patterns
         self.port_scan_patterns = [
             'port scan', 'scan detected', 'connection attempts',
             'possible scan', 'repeated attempts', 'firewall:',
             'dropped:', 'blocked:'
         ]
         
-        # Padrões de brute force
+        # Brute force patterns
         self.bruteforce_patterns = [
             'failed password', 'authentication failure', 'invalid user',
             'prelogin', 'login failed', 'breach attempt'
@@ -35,20 +51,20 @@ class LogSearcher:
     
     def search_ip_activity(self, ip_str: str, search_window_hours: int = 72) -> Dict:
         """
-        Busca atividades de um IP em todos os logs
+        Search all logs for IP activity within time window.
         
         Args:
-            ip_str: IP a ser buscado
-            search_window_hours: Janela de tempo em horas para buscar
+            ip_str: IP address to search
+            search_window_hours: Time window in hours (default: 72)
             
         Returns:
-            Dict com eventos encontrados e estatísticas
+            Dict with events found, statistics, and recent events
         """
         log_events = []
         total_files_searched = 0
         
         try:
-            # Busca em syslog
+            # Search syslog and rotated logs
             log_files = self._find_all_log_files()
             for log_path, file_type in log_files:
                 try:
@@ -65,7 +81,7 @@ class LogSearcher:
                 except Exception as e:
                     self.logger.warning(f"Error searching {log_path}: {e}")
             
-            # Busca em MSSQL logs
+            # Search MSSQL logs
             if Path(self.config.mssql_error_log_path).exists():
                 try:
                     with open(self.config.mssql_error_log_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -78,7 +94,7 @@ class LogSearcher:
         except Exception as e:
             self.logger.error(f"Error during log search for {ip_str}: {e}")
         
-        # Ordena por timestamp e pega eventos recentes
+        # Sort by timestamp, return top 10 recent
         recent_events = sorted(log_events, key=lambda x: x.get('timestamp', ''), reverse=True)[:10]
         
         return {
@@ -92,14 +108,14 @@ class LogSearcher:
         }
     
     def _find_all_log_files(self) -> List[Tuple[Path, str]]:
-        """Encontra todos os arquivos de log incluindo rotacionados"""
+        """Find all log files including rotated and compressed archives."""
         log_files = []
         base_log_path = Path(self.config.syslog_path)
         
         if base_log_path.exists():
             log_files.append((base_log_path, 'text'))
         
-        # Padrões de logs rotacionados
+        # Rotated log patterns
         log_patterns = [
             f"{base_log_path}.*",
             f"{base_log_path}.*.gz",
@@ -116,12 +132,12 @@ class LogSearcher:
                     file_type = 'gzip' if path.suffix == '.gz' else 'text'
                     log_files.append((path, file_type))
         
-        self.logger.debug(f"Found {len(log_files)} log files to search")
+        self.logger.debug(f"Found {len(log_files)} log files")
         return log_files
     
     def _search_file_for_ip(self, file_obj, ip_str: str, source_name: str, 
                            search_window_hours: int) -> List[Dict]:
-        """Busca IP em um único arquivo de log"""
+        """Search single log file for IP within time window."""
         events = []
         cutoff_time = datetime.now() - timedelta(hours=search_window_hours)
         
@@ -136,10 +152,10 @@ class LogSearcher:
         return events
     
     def _analyze_log_line(self, line: str, ip_str: str, source: str) -> Dict:
-        """Analisa uma linha de log e categoriza o evento"""
+        """Analyze log line and categorize security event."""
         line_lower = line.lower()
         
-        # Detecção de port scan
+        # Port scan detection
         if any(pattern in line_lower for pattern in self.port_scan_patterns):
             return {
                 'source': source,
@@ -149,7 +165,7 @@ class LogSearcher:
                 'confidence': 'high' if 'dropped' in line_lower or 'blocked' in line_lower else 'medium'
             }
         
-        # Detecção de brute force
+        # Brute force detection
         if any(pattern in line_lower for pattern in self.bruteforce_patterns):
             event_type = 'prelogin_bruteforce' if 'prelogin' in line_lower else 'failed_login'
             return {
@@ -160,7 +176,7 @@ class LogSearcher:
                 'confidence': 'high'
             }
         
-        # Padrões específicos do MSSQL
+        # MSSQL-specific patterns
         if 'mssql' in source.lower() or 'sql' in source.lower():
             if 'login failed' in line_lower:
                 return {
@@ -171,7 +187,7 @@ class LogSearcher:
                     'confidence': 'high'
                 }
         
-        # Atividade suspeita genérica
+        # Generic suspicious activity
         if any(word in line_lower for word in ['warning', 'error', 'alert', 'intrusion']):
             return {
                 'source': source,
@@ -184,7 +200,7 @@ class LogSearcher:
         return None
     
     def _search_mssql_logs(self, file_obj, ip_str: str) -> List[Dict]:
-        """Busca específica em logs do MSSQL"""
+        """MSSQL-specific log search."""
         events = []
         
         for line in file_obj:
@@ -200,17 +216,17 @@ class LogSearcher:
         return events
     
     def _parse_timestamp(self, timestamp_str: str) -> datetime:
-        """Parse de vários formatos de timestamp"""
+        """Parse various timestamp formats."""
         if not timestamp_str or timestamp_str == "Unknown":
             return None
         
         try:
-            # Formato syslog: "Nov 23 14:12:51"
+            # Syslog format: "Nov 23 14:12:51"
             if re.match(r'\w+\s+\d+\s+\d+:\d+:\d+', timestamp_str):
                 current_year = datetime.now().year
                 return datetime.strptime(f"{current_year} {timestamp_str}", "%Y %b %d %H:%M:%S")
             
-            # Formato ISO: "2024-12-23 14:12:51"
+            # ISO format: "2024-12-23 14:12:51"
             elif re.match(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', timestamp_str):
                 return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
         except ValueError:
@@ -219,11 +235,11 @@ class LogSearcher:
         return None
     
     def _extract_timestamp(self, line: str) -> str:
-        """Extrai timestamp de linha do syslog"""
+        """Extract timestamp from syslog line."""
         match = re.search(r'(\w+\s+\d+\s+\d+:\d+:\d+)', line)
         return match.group(1) if match else "Unknown"
     
     def _extract_mssql_timestamp(self, line: str) -> str:
-        """Extrai timestamp de linha do MSSQL"""
+        """Extract timestamp from MSSQL log line."""
         match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
         return match.group(1) if match else "Unknown"

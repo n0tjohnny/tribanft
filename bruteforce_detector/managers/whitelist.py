@@ -1,3 +1,21 @@
+"""
+TribanFT Whitelist Manager
+
+Manages trusted IPs and networks that should never be blocked.
+
+Supports:
+- Individual IP addresses (IPv4/IPv6)
+- Network ranges in CIDR notation (e.g., 192.168.0.0/24)
+- Hot-reloading from configuration file
+- Efficient membership testing
+
+The whitelist is checked before any IP is blacklisted to prevent blocking
+trusted infrastructure like admin IPs, monitoring systems, or internal networks.
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
 from typing import Set, List, Optional
 import ipaddress
 from pathlib import Path
@@ -7,19 +25,26 @@ from datetime import datetime
 from ..config import get_config
 from ..utils.validators import validate_ip, validate_cidr
 
+
 class WhitelistManager:
     """Manages whitelisted IPs and networks"""
     
     def __init__(self):
-        self.individual_ips: Set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()  # FIXED
-        self.networks: List[ipaddress.IPv4Network | ipaddress.IPv6Network] = []  # FIXED
+        """Initialize whitelist manager and load entries from file."""
+        self.individual_ips: Set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
+        self.networks: List[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
         self.last_loaded: Optional[datetime] = None
         self.logger = logging.getLogger(__name__)
         self.config = get_config()
         self._load_whitelist()
     
     def _load_whitelist(self):
-        """Load whitelist from file"""
+        """
+        Load whitelist from configuration file.
+        
+        Parses both individual IPs and CIDR notation networks.
+        Creates default file if missing.
+        """
         whitelist_file = Path(self.config.whitelist_file)
         
         if not whitelist_file.exists():
@@ -39,23 +64,23 @@ class WhitelistManager:
                             network = ipaddress.ip_network(line, strict=False)
                             self.networks.append(network)
                         else:
-                            self.logger.warning(f"Invalid CIDR in whitelist (line {line_num}): {line}")
+                            self.logger.warning(f"Invalid CIDR (line {line_num}): {line}")
                     else:
                         # Individual IP
                         if validate_ip(line):
                             ip = ipaddress.ip_address(line)
                             self.individual_ips.add(ip)
                         else:
-                            self.logger.warning(f"Invalid IP in whitelist (line {line_num}): {line}")
+                            self.logger.warning(f"Invalid IP (line {line_num}): {line}")
             
             self.last_loaded = datetime.now()
-            self.logger.info(f"Loaded {len(self.individual_ips)} individual IPs and {len(self.networks)} networks from whitelist")
+            self.logger.info(f"Loaded {len(self.individual_ips)} IPs and {len(self.networks)} networks")
             
         except Exception as e:
             self.logger.error(f"Error loading whitelist: {e}")
     
     def _create_default_whitelist(self):
-        """Create default whitelist file with examples"""
+        """Create default whitelist file with examples."""
         whitelist_file = Path(self.config.whitelist_file)
         whitelist_file.parent.mkdir(parents=True, exist_ok=True)
         
@@ -68,11 +93,19 @@ class WhitelistManager:
 """
         with open(whitelist_file, 'w') as f:
             f.write(default_content)
-        self.logger.info(f"Created default whitelist file: {whitelist_file}")
+        self.logger.info(f"Created default whitelist: {whitelist_file}")
     
-    def is_whitelisted(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:  # FIXED
-        """Check if an IP is whitelisted"""
-        # Check individual IPs first (faster)
+    def is_whitelisted(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        """
+        Check if IP is whitelisted.
+        
+        Args:
+            ip: IP address object to check
+            
+        Returns:
+            True if IP is in whitelist or belongs to whitelisted network
+        """
+        # Check individual IPs (faster)
         if ip in self.individual_ips:
             return True
         
@@ -84,7 +117,15 @@ class WhitelistManager:
         return False
     
     def add_to_whitelist(self, ip_or_network: str) -> bool:
-        """Add an IP or network to whitelist"""
+        """
+        Add IP or network to whitelist and persist to file.
+        
+        Args:
+            ip_or_network: IP address or CIDR notation network
+            
+        Returns:
+            True if successfully added, False on error
+        """
         try:
             if '/' in ip_or_network:
                 if not validate_cidr(ip_or_network):
@@ -110,7 +151,15 @@ class WhitelistManager:
             return False
     
     def remove_from_whitelist(self, ip_or_network: str) -> bool:
-        """Remove an IP or network from whitelist"""
+        """
+        Remove IP or network from whitelist.
+        
+        Args:
+            ip_or_network: IP address or CIDR notation to remove
+            
+        Returns:
+            True if removed, False if not found or error
+        """
         try:
             removed = False
             
@@ -126,14 +175,9 @@ class WhitelistManager:
                     removed = True
             
             if removed:
-                # Rewrite file without the removed entry
+                # Rewrite file
                 with open(self.config.whitelist_file, 'w') as f:
-                    f.write("# IP Whitelist\n")
-                    f.write("# Add one IP per line to whitelist\n")
-                    f.write("# Examples:\n")
-                    f.write("# 192.168.1.100\n")
-                    f.write("# 10.0.0.0/24\n\n")
-                    
+                    f.write("# IP Whitelist\n\n")
                     for ip in sorted(self.individual_ips):
                         f.write(f"{ip}\n")
                     for network in sorted(self.networks):
@@ -148,7 +192,7 @@ class WhitelistManager:
             return False
     
     def get_whitelist_entries(self) -> List[str]:
-        """Get all whitelist entries"""
+        """Get all whitelist entries as strings."""
         entries = [str(ip) for ip in sorted(self.individual_ips)]
         entries.extend(str(network) for network in sorted(self.networks))
         return entries

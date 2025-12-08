@@ -1,3 +1,18 @@
+"""
+TribanFT State Manager
+
+Manages processing state between detection runs for incremental parsing.
+
+Persists run history to enable incremental log processing - only parse
+logs since last successful run. Stores timestamps and file positions
+to avoid reprocessing the same events.
+
+State file location: /var/lib/tribanft/state.json
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
 import json
 from pathlib import Path
 from typing import Optional
@@ -7,16 +22,23 @@ from datetime import datetime
 from ..models import ProcessingState
 from ..config import get_config
 
+
 class StateManager:
     """Manages processing state between runs"""
     
     def __init__(self):
+        """Initialize state manager with configuration."""
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self.state_file = Path(self.config.state_file)
     
     def get_state(self) -> Optional[ProcessingState]:
-        """Load processing state from file"""
+        """
+        Load processing state from file.
+        
+        Returns:
+            ProcessingState object with last run timestamp, or None if no state exists
+        """
         if not self.state_file.exists():
             return None
         
@@ -29,7 +51,12 @@ class StateManager:
             return None
     
     def update_state(self):
-        """Update processing state with current timestamp"""
+        """
+        Update processing state with current timestamp.
+        
+        Called after successful detection cycle to mark this run's completion.
+        Next run will only process events newer than this timestamp.
+        """
         state = ProcessingState()
         state.last_processed_timestamp = datetime.now()
         

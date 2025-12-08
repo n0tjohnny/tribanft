@@ -1,4 +1,4 @@
-# TribanFT  
+# tribanFT  
 **Threat Intelligence & Brute Force Advanced Network Firewall**
 
 Cybersecurity system that unifies CrowdSec, NFTables, and Fail2Ban into a coordinated threat detection and blocking platform.
@@ -47,14 +47,14 @@ git clone https://github.com/n0tjohnny/tribanft.git
 cd tribanft
 
 # Install package
-pip install -e . --break-system-packages
+pip install -e .
 
 # Create directories
 mkdir -p /var/lib/tribanft /etc/tribanft
 touch /root/blacklist_ipv4.txt /root/whitelist_ips.txt
 
 # Set up hourly detection (crontab)
-(crontab -l 2>/dev/null; echo "0 * * * * /usr/local/bin/tribanft --detect >> /var/log/tribanft.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "10 * * * * /usr/local/bin/tribanft --detect >> /var/log/tribanft.log 2>&1") | crontab -
 ```
 
 ### Optional - Geolocation Service
