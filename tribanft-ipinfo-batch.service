@@ -1,0 +1,40 @@
+[Unit]
+Description=TribanFT IP Geolocation Batch Service
+Documentation=https://github.com/n0tjohnny/tribanft
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Caminho do script
+ExecStart=/usr/bin/python3 /root/bruteforce_detector/tribanft-ipinfo-batch.py --daemon --interval 3600 --batch-size 100
+
+# Restart automaticamente em caso de falha
+Restart=on-failure
+RestartSec=60
+
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tribanft-ipinfo-batch
+
+# Limites de recursos
+MemoryMax=512M
+CPUQuota=50%
+
+# Timeout
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Diretórios de trabalho
+WorkingDirectory=/root/bruteforce_detector
+RuntimeDirectory=tribanft
+
+# Variáveis de ambiente
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

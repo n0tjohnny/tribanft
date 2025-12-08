@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""
+OTIMIZADO: Auto-carrega caches CSV/JSON existentes
+"""
+
+import json
+import logging
+import time
+import csv
+from typing import Dict, Optional, Any
+from pathlib import Path
+from datetime import datetime
+import ipaddress
+import requests
+
+from bruteforce_detector.managers.blacklist_writer import BlacklistWriter
+
+
+class IPInfoBatchManager:
+    """Gerenciador otimizado com auto-load de caches"""
+    
+    def __init__(self, config, api_token: Optional[str] = None):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.blacklist_writer = BlacklistWriter(config)
+        
+        self.api_token = api_token or self._load_token()
+        self.base_url = "https://ipinfo.io"
+        
+        # Rate limits
+        self.daily_limit = 1000
+        self.rate_limit_per_minute = 15
+        
+        # Paths
+        self.cache_dir = Path("/var/lib/tribanft/ipinfo_cache")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.results_file = Path("/root/projeto-ip-info-results.json")
+        self.stats_file = self.cache_dir / "ipinfo_stats.json"
+        
+        # Cache - carrega automaticamente
+        self.cache = self._load_all_caches()
+        self.stats = self._load_stats()
+        
+        # Rate limiting
+        self.requests_this_minute = 0
+        self.minute_window_start = datetime.now()
+        self.requests_today = self.stats.get('requests_today', 0)
+        self.last_reset_date = self.stats.get('last_reset_date', datetime.now().date().isoformat())
+    
+    def _load_all_caches(self) -> Dict[str, Dict]:
+        """Carrega TODOS os caches disponíveis (JSON + CSV)"""
+        cache = {}
+        
+        # 1. Cache JSON principal
+        if self.results_file.exists():
+            try:
+                with open(self.results_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    cache.update(data)
+                    self.logger.info(f"📥 JSON cache: {len(data)} IPs")
+            except Exception as e:
+                self.logger.warning(f"JSON cache error: {e}")
+        
+        # 2. Cache CSV legado
+        csv_file = Path("/root/projeto-ip-info-results-portscanners-ip4.csv")
+        if csv_file.exists():
+            try:
+                csv_count = 0
+                with open(csv_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        ip = row.get('query') or row.get('ip')
+                        if ip and ip not in cache:
+                            cache[ip] = self._csv_to_ipinfo_format(row)
+                            csv_count += 1
+                self.logger.info(f"📥 CSV cache: {csv_count} IPs")
+            except Exception as e:
+                self.logger.warning(f"CSV cache error: {e}")
+        
+        self.logger.info(f"📊 Total cache: {len(cache)} IPs")
+        return cache
+    
+    def _csv_to_ipinfo_format(self, row: Dict) -> Dict:
+        """Converte CSV para formato ipinfo.io"""
+        return {
+            'ip': row.get('query') or row.get('ip'),
+            'country': row.get('country'),
+            'region': row.get('region'),
+            'city': row.get('city'),
+            'postal': row.get('zip'),
+            'loc': f"{row.get('lat', '')},{row.get('lon', '')}",
+            'timezone': row.get('timezone'),
+            'org': row.get('org') or row.get('as'),
+            'imported_from_csv': True
+        }
+    
+    def _load_token(self) -> Optional[str]:
+        token_file = Path("/etc/tribanft/ipinfo_token.txt")
+        if token_file.exists():
+            try:
+                return token_file.read_text().strip()
+            except Exception as e:
+                self.logger.warning(f"Token error: {e}")
+        return None
+    
+    def _load_stats(self) -> Dict[str, Any]:
+        if self.stats_file.exists():
+            try:
+                with open(self.stats_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                self.logger.warning(f"Stats error: {e}")
+        
+        return {
+            'requests_today': 0,
+            'last_reset_date': datetime.now().date().isoformat(),
+            'total_requests': 0,
+            'cache_hits': 0,
+            'api_calls': 0
+        }
+    
+    def _save_stats(self):
+        try:
+            with open(self.stats_file, 'w') as f:
+                json.dump(self.stats, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Save stats error: {e}")
+    
+    def _check_rate_limits(self) -> bool:
+        now = datetime.now()
+        today = now.date().isoformat()
+        
+        if today != self.last_reset_date:
+            self.requests_today = 0
+            self.last_reset_date = today
+            self.stats['requests_today'] = 0
+            self.stats['last_reset_date'] = today
+        
+        if self.requests_today >= self.daily_limit:
+            self.logger.warning(f"⚠️  Limite diário: {self.daily_limit}")
+            return False
+        
+        if (now - self.minute_window_start).total_seconds() >= 60:
+            self.requests_this_minute = 0
+            self.minute_window_start = now
+        
+        if self.requests_this_minute >= self.rate_limit_per_minute:
+            wait = 60 - (now - self.minute_window_start).total_seconds()
+            if wait > 0:
+                time.sleep(wait + 1)
+                self.requests_this_minute = 0
+                self.minute_window_start = datetime.now()
+        
+        return True
+    
+    def get_ip_info(self, ip_str: str, use_cache: bool = True) -> Optional[Dict]:
+        """Obtém info com cache prioritário"""
+        if use_cache and ip_str in self.cache:
+            self.stats['cache_hits'] = self.stats.get('cache_hits', 0) + 1
+            return self.cache[ip_str]
+        
+        if not self._check_rate_limits():
+            return None
+        
+        try:
+            url = f"{self.base_url}/{ip_str}"
+            if self.api_token:
+                url += f"?token={self.api_token}"
+            
+            response = requests.get(url, timeout=10)
+            self.requests_this_minute += 1
+            
+            if response.status_code == 200:
+                data = response.json()
+                data['query'] = ip_str
+                data['timestamp'] = datetime.now().isoformat()
+                self.cache[ip_str] = data
+                
+                self.requests_today += 1
+                self.stats['api_calls'] = self.stats.get('api_calls', 0) + 1
+                self.stats['requests_today'] = self.requests_today
+                
+                if self.stats['api_calls'] % 10 == 0:
+                    self._save_results()
+                    self._save_stats()
+                
+                return data
+            elif response.status_code == 429:
+                self.logger.warning(f"⚠️  Rate limit 429")
+                time.sleep(60)
+                self.requests_today = self.daily_limit
+                return None
+            else:
+                self.logger.warning(f"HTTP {response.status_code}")
+                return None
+        except Exception as e:
+            self.logger.error(f"Request error: {e}")
+            return None
+    
+    def _save_results(self):
+        """Salva cache JSON"""
+        try:
+            if self.results_file.exists():
+                backup = Path(str(self.results_file) + '.backup')
+                self.results_file.rename(backup)
+            
+            with open(self.results_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, indent=2, ensure_ascii=False)
+            
+            backup = Path(str(self.results_file) + '.backup')
+            if backup.exists():
+                backup.unlink()
+        except Exception as e:
+            self.logger.error(f"Save error: {e}")
+    
+    def _normalize_ipinfo_response(self, data: Dict) -> Dict:
+        """Normaliza para formato IP-API"""
+        loc = data.get('loc', ',').split(',')
+        return {
+            'country': data.get('country'),
+            'city': data.get('city'),
+            'isp': data.get('org', '').split()[0] if data.get('org') else None,
+            'org': data.get('org'),
+            'lat': loc[0] if len(loc) > 0 else None,
+            'lon': loc[1] if len(loc) > 1 else None
+        }
+    
+    def process_blacklist_batch(self, max_requests: int = 100) -> int:
+        """Processa batch com cache prioritário"""
+        self.logger.info("🔍 Processando blacklist...")
+        
+        blacklist_path = Path(self.config.blacklist_ipv4_file)
+        if not blacklist_path.exists():
+            self.logger.warning("⚠️  Blacklist não encontrado")
+            return 0
+        
+        # Lê usando BlacklistWriter
+        existing = self.blacklist_writer.read_blacklist(str(blacklist_path))
+        
+        # IPs sem geo
+        ips_without_geo = []
+        for ip_str, info in existing.items():
+            try:
+                ipaddress.ip_address(ip_str)
+            except ValueError:
+                continue
+            
+            geo = info.get('geolocation')
+            if not geo or geo.get('country') in [None, 'Unknown', 'Unknown Location']:
+                ips_without_geo.append(ip_str)
+        
+        if not ips_without_geo:
+            self.logger.info("✅ Todos IPs têm geo")
+            return 0
+        
+        self.logger.info(f"📋 {len(ips_without_geo)} IPs sem geo")
+        
+        # Prioriza cache
+        from_cache = 0
+        from_api = 0
+        ips_to_update = {}
+        
+        for ip_str in ips_without_geo:
+            # Cache hit?
+            if ip_str in self.cache:
+                full_data = self.cache[ip_str]
+                normalized = self._normalize_ipinfo_response(full_data)
+                
+                ips_to_update[ip_str] = {
+                    **existing[ip_str],
+                    'geolocation': {
+                        'country': normalized.get('country', 'Unknown'),
+                        'city': normalized.get('city', ''),
+                        'isp': normalized.get('org', 'Unknown ISP')
+                    }
+                }
+                from_cache += 1
+            
+            # API call (se dentro do limite)
+            elif from_api < max_requests:
+                if not self._check_rate_limits():
+                    continue  # Pula API mas continua cache
+                
+                full_data = self.get_ip_info(ip_str, use_cache=False)
+                if full_data:
+                    normalized = self._normalize_ipinfo_response(full_data)
+                    ips_to_update[ip_str] = {
+                        **existing[ip_str],
+                        'geolocation': {
+                            'country': normalized.get('country', 'Unknown'),
+                            'city': normalized.get('city', ''),
+                            'isp': normalized.get('org', 'Unknown ISP')
+                        }
+                    }
+                    from_api += 1
+        
+        self.logger.info(f"💾 Cache: {from_cache} | 🌐 API: {from_api}")
+        
+        # Salva usando BlacklistWriter
+        if ips_to_update:
+            existing.update(ips_to_update)
+            self.blacklist_writer.write_blacklist(
+                str(blacklist_path),
+                existing,
+                len(ips_to_update)
+            )
+            self._save_results()
+            self._save_stats()
+        
+        return len(ips_to_update)
+    
+    def get_stats_summary(self) -> Dict[str, Any]:
+        remaining = max(0, self.daily_limit - self.requests_today)
+        return {
+            'requests_today': self.requests_today,
+            'remaining_today': remaining,
+            'daily_limit': self.daily_limit,
+            'cache_size': len(self.cache),
+            'cache_hits': self.stats.get('cache_hits', 0),
+            'api_calls': self.stats.get('api_calls', 0)
+        }
+    
+    def print_stats(self):
+        stats = self.get_stats_summary()
+        print(f"\n{'='*70}")
+        print("📊 ESTATÍSTICAS - IPINFO.IO")
+        print(f"{'='*70}")
+        print(f"📈 Hoje:        {stats['requests_today']}/{stats['daily_limit']}")
+        print(f"💾 Cache:       {stats['cache_size']} IPs")
+        print(f"🎯 Cache hits:  {stats['cache_hits']}")
+        print(f"🌐 API calls:   {stats['api_calls']}")
+        print(f"{'='*70}\n")
