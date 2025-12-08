@@ -1,16 +1,50 @@
+"""
+TribanFT Port Scan Detector
+
+Detects port scanning activity from attackers probing for open services.
+
+Attack pattern:
+Attackers systematically probe multiple ports on target systems to identify
+vulnerable services. These attempts are logged by firewalls and intrusion detection systems.
+
+Detection logic:
+- Counts port scan events per IP within time window
+- Triggers when threshold exceeded (default: 20 events in 7 days)
+- Medium confidence - automated scanning tools generate distinctive patterns
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
 from typing import List
 from .base import BaseDetector
 from ..models import SecurityEvent, DetectionResult, DetectionConfidence, EventType
 from ..config import config
 
+
 class PortScanDetector(BaseDetector):
     """Detects port scanning activity"""
     
     def __init__(self, whitelist_manager):
+        """
+        Initialize port scan detector.
+        
+        Args:
+            whitelist_manager: WhitelistManager for filtering trusted IPs
+        """
         super().__init__("port_scan_detector", whitelist_manager)
         self.enabled = config.enable_port_scan_detection
     
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
+        """
+        Analyze events and identify port scanning attacks.
+        
+        Args:
+            events: List of SecurityEvent objects from log parsers
+            
+        Returns:
+            List of DetectionResult objects for detected threats
+        """
         if not self.enabled:
             return []
         

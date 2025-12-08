@@ -1,3 +1,21 @@
+"""
+TribanFT CrowdSec Integration
+
+Integrates with CrowdSec for collaborative threat intelligence.
+
+CrowdSec is a collaborative security engine that shares threat intelligence
+across a community. This detector imports IP decisions from CrowdSec's local
+agent to complement local detection.
+
+Detection logic:
+- Queries CrowdSec for currently blocked IPs
+- Medium confidence - relies on community intelligence
+- No threshold needed - direct import from CrowdSec decisions
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
 import subprocess
 from typing import List
 from datetime import datetime
@@ -8,16 +26,32 @@ from .base import BaseDetector
 from ..models import SecurityEvent, DetectionResult, DetectionConfidence, EventType
 from ..config import get_config
 
+
 class CrowdSecDetector(BaseDetector):
     """Integrates with CrowdSec for additional detections"""
     
     def __init__(self, whitelist_manager):
+        """
+        Initialize CrowdSec detector.
+        
+        Args:
+            whitelist_manager: WhitelistManager for filtering trusted IPs
+        """
         super().__init__("crowdsec_detector", whitelist_manager)
         self.config = get_config()
         self.enabled = self.config.enable_crowdsec_integration
         self.logger = logging.getLogger(__name__)
     
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
+        """
+        Query CrowdSec and import blocked IPs as detections.
+        
+        Args:
+            events: List of SecurityEvent objects (not used for CrowdSec)
+            
+        Returns:
+            List of DetectionResult objects from CrowdSec decisions
+        """
         if not self.enabled:
             return []
         
@@ -25,7 +59,7 @@ class CrowdSecDetector(BaseDetector):
         results = []
         
         for ip in blocked_ips:
-            # Create a synthetic SecurityEvent for CrowdSec block
+            # Create synthetic SecurityEvent for CrowdSec block
             synthetic_event = SecurityEvent(
                 source_ip=ip,
                 event_type=EventType.CROWDSEC_BLOCK,
@@ -47,7 +81,12 @@ class CrowdSecDetector(BaseDetector):
         return results
     
     def _get_crowdsec_blocked_ips(self):
-        """Get currently blocked IPs from CrowdSec"""
+        """
+        Query CrowdSec CLI for currently blocked IPs.
+        
+        Returns:
+            Set of IP addresses blocked by CrowdSec
+        """
         blocked_ips = set()
         
         try:
