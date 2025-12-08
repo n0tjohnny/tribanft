@@ -1,3 +1,18 @@
+"""
+TribanFT MSSQL Parser
+
+Extracts security events from Microsoft SQL Server error logs.
+
+Parses MSSQL errorlog for:
+- Failed login attempts
+- Authentication errors with IP addresses
+
+Log format: 2025-11-20 13:22:32.99 Logon Login failed for user 'sa'. [CLIENT: 1.2.3.4]
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
 import re
 from datetime import datetime
 from typing import List, Optional
@@ -8,13 +23,25 @@ from .base import BaseLogParser
 from ..models import SecurityEvent, EventType
 from ..utils.validators import validate_ip
 
+
 class MSSQLParser(BaseLogParser):
     """Parser for MSSQL error logs"""
     
     def __init__(self, log_path: str):
+        """Initialize MSSQL parser with log path."""
         super().__init__(log_path)
     
     def parse(self, since_timestamp: Optional[datetime] = None, max_lines: Optional[int] = None) -> List[SecurityEvent]:
+        """
+        Parse MSSQL log file and extract security events.
+        
+        Args:
+            since_timestamp: Only return events after this time
+            max_lines: Maximum lines to process
+            
+        Returns:
+            List of SecurityEvent objects
+        """
         events = []
         line_count = 0
         
@@ -35,9 +62,17 @@ class MSSQLParser(BaseLogParser):
         return events
     
     def _parse_line(self, line: str, since_timestamp: Optional[datetime]) -> Optional[SecurityEvent]:
-        """Parse a single MSSQL log line for failed logins"""
+        """
+        Parse single MSSQL log line for failed logins.
+        
+        Args:
+            line: Log line to parse
+            since_timestamp: Skip events older than this
+            
+        Returns:
+            SecurityEvent if pattern matched, None otherwise
+        """
         try:
-            # More flexible patterns for failed logins
             failed_login_patterns = [
                 r'Login failed for user.*\[CLIENT:\s*([0-9a-fA-F\.:]+)\]',
                 r'Login failed for user.*Reason:.*\[CLIENT:\s*([0-9a-fA-F\.:]+)\]'
@@ -48,7 +83,6 @@ class MSSQLParser(BaseLogParser):
                 if match:
                     ip_str = match.group(1).strip()
                     if validate_ip(ip_str):
-                        # Parse timestamp from MSSQL log
                         timestamp = self._parse_timestamp(line) or datetime.now()
                         
                         if since_timestamp and timestamp < since_timestamp:
@@ -73,8 +107,15 @@ class MSSQLParser(BaseLogParser):
             return None
     
     def _parse_timestamp(self, line: str) -> Optional[datetime]:
-        """Parse timestamp from MSSQL log line"""
-        # MSSQL log format: 2025-11-20 13:22:32.99
+        """
+        Parse timestamp from MSSQL log line.
+        
+        Args:
+            line: Log line containing timestamp
+            
+        Returns:
+            Parsed datetime or None
+        """
         match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
         if match:
             timestamp_str = match.group(1)
