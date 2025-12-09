@@ -7,7 +7,7 @@ Provides common functionality for all detectors:
 - Whitelist filtering to exclude trusted IPs
 - Event grouping by source IP
 - Time window calculations for rate-based detection
-- Standardized detection interface
+- Standardized detection interface with timestamp guarantees
 
 All detector implementations must inherit from this class and implement
 the detect() method with their specific detection logic.
@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 from typing import List, Set
 from datetime import datetime, timedelta
 import ipaddress
+import logging
 
 from ..models import SecurityEvent, DetectionResult, DetectionConfidence
 from ..managers.whitelist import WhitelistManager
@@ -46,6 +47,7 @@ class BaseDetector(ABC):
         self.whitelist_manager = whitelist_manager
         self.config = get_config()
         self.enabled = True
+        self.logger = logging.getLogger(__name__)
     
     @abstractmethod
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
@@ -115,3 +117,48 @@ class BaseDetector(ABC):
             
         cutoff_time = reference_time - timedelta(minutes=time_window_minutes)
         return [event for event in events if event.timestamp >= cutoff_time]
+    
+    def _create_detection_result(self, ip_events: List[SecurityEvent], 
+                                 reason: str, confidence: DetectionConfidence) -> DetectionResult:
+        """
+        Create DetectionResult with guaranteed timestamps.
+        
+        Ensures first_seen and last_seen are always populated from events.
+        Falls back to current time only if no events have timestamps.
+        
+        Args:
+            ip_events: List of SecurityEvent objects for this IP
+            reason: Human-readable reason for detection
+            confidence: Detection confidence level
+            
+        Returns:
+            DetectionResult with guaranteed timestamp fields
+            
+        Raises:
+            ValueError: If ip_events is empty
+        """
+        if not ip_events:
+            raise ValueError("Cannot create DetectionResult without events")
+        
+        # Extract all valid timestamps from events
+        timestamps = [e.timestamp for e in ip_events if e.timestamp]
+        
+        # Use event timestamps if available, otherwise current time
+        now = datetime.now()
+        first_seen = min(timestamps) if timestamps else now
+        last_seen = max(timestamps) if timestamps else now
+        
+        self.logger.debug(
+            f"Creating detection for {ip_events[0].source_ip}: "
+            f"{len(ip_events)} events, first={first_seen}, last={last_seen}"
+        )
+        
+        return DetectionResult(
+            ip=ip_events[0].source_ip,
+            reason=reason,
+            confidence=confidence,
+            event_count=len(ip_events),
+            source_events=ip_events,
+            first_seen=first_seen,
+            last_seen=last_seen
+        )

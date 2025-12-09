@@ -4,7 +4,7 @@ TribanFT Blacklist Manager
 Orchestrates blacklist operations and coordinates all blacklist-related components.
 
 This module is the central controller for IP blacklisting, managing:
-- Automatic IP blocking from detection results
+- Automatic IP blocking from detection results with timestamps
 - Manual IP addition with comprehensive investigation
 - Bidirectional synchronization with NFTables firewall
 - Integration with geolocation and log analysis
@@ -76,7 +76,7 @@ class BlacklistManager:
         Process new detections and update blacklist storage.
         
         Workflow:
-        1. Prepare detection data with metadata
+        1. Prepare detection data with metadata and timestamps
         2. Write to blacklist files/database
         3. Synchronize with NFTables firewall
         4. Import any new IPs found in NFTables
@@ -106,7 +106,7 @@ class BlacklistManager:
         1. Validate IP address format
         2. Check whitelist (prevent blocking trusted IPs)
         3. Investigate IP (geolocation + log analysis)
-        4. Add to manual blacklist file
+        4. Add to manual blacklist file with timestamps
         5. Propagate to main blacklist files
         6. Generate investigation report
         
@@ -128,6 +128,14 @@ class BlacklistManager:
             # Investigate IP with full context
             investigation = self.investigator.investigate_ip(ip_str, search_logs)
             investigation['ip'] = ip
+            
+            # Ensure all timestamps are set
+            now = datetime.now()
+            if not investigation.get('first_seen'):
+                investigation['first_seen'] = now
+            if not investigation.get('last_seen'):
+                investigation['last_seen'] = investigation.get('first_seen', now)
+            investigation['date_added'] = now  # Always set when adding to blacklist
             
             # Add to blacklist files
             self._add_to_manual_blacklist(ip_str, investigation)
@@ -160,7 +168,7 @@ class BlacklistManager:
         try:
             return self.nft_sync.run_sync(
                 sync_to_nftables=sync_to_nftables,
-                add_geolocation=add_geolocation,  # Default False for speed
+                add_geolocation=add_geolocation,
                 max_geo_requests=0
             )
         except Exception as e:
@@ -250,13 +258,22 @@ class BlacklistManager:
         
         Extracts and structures all metadata from detections for storage.
         Filters out whitelisted IPs before preparation.
+        NOW INCLUDES: Guaranteed timestamps (first_seen, last_seen, date_added)
         """
+        now = datetime.now()
+        
         return {
             str(d.ip): {
-                'ip': d.ip, 'reason': d.reason, 'confidence': d.confidence.value,
-                'event_count': d.event_count, 'geolocation': d.geolocation,
-                'first_seen': d.first_seen, 'last_seen': d.last_seen,
-                'timestamp': datetime.now(), 'source': 'automatic'
+                'ip': d.ip,
+                'reason': d.reason,
+                'confidence': d.confidence.value,
+                'event_count': d.event_count,
+                'geolocation': d.geolocation,
+                'first_seen': d.first_seen or now,      # From events
+                'last_seen': d.last_seen or now,        # From events
+                'date_added': now,                       # When added to blacklist
+                'timestamp': now,                        # Legacy compatibility
+                'source': 'automatic'
             }
             for d in detections if not self.whitelist_manager.is_whitelisted(d.ip)
         }
@@ -266,7 +283,7 @@ class BlacklistManager:
         Merge new IPs with existing blacklist and write to storage.
         
         Handles merging of automatic detections, manual additions, and
-        existing entries while preserving metadata.
+        existing entries while preserving metadata and timestamps.
         """
         existing = self.writer.read_blacklist(filename)
         manual = self._get_manual_ips_info()
@@ -275,15 +292,21 @@ class BlacklistManager:
         self.writer.write_blacklist(filename, all_ips, new_count)
     
     def _get_manual_ips_info(self) -> Dict:
-        """Retrieve manual IPs with enriched metadata."""
+        """Retrieve manual IPs with enriched metadata and timestamps."""
+        now = datetime.now()
         manual_ips = self.writer.get_manual_ips(self.manual_blacklist_file)
+        
         return {
             ip_str: {
                 'ip': ipaddress.ip_address(ip_str),
                 'reason': 'Manually added (from manual blacklist)',
-                'confidence': 'manual', 'event_count': 0,
+                'confidence': 'manual',
+                'event_count': 0,
                 'geolocation': self.geolocation_manager.get_ip_info(ipaddress.ip_address(ip_str)) if self.geolocation_manager else None,
-                'first_seen': datetime.now(), 'source': 'manual'
+                'first_seen': now,
+                'last_seen': now,
+                'date_added': now,
+                'source': 'manual'
             }
             for ip_str in manual_ips
             if not self.whitelist_manager.is_whitelisted(ipaddress.ip_address(ip_str))
@@ -323,9 +346,9 @@ class BlacklistManager:
         self._write_manual_blacklist(manual_path, entries)
     
     def _write_manual_blacklist(self, path: Path, entries: Dict):
-        """Write manual blacklist file with enhanced formatting."""
+        """Write manual blacklist file with enhanced formatting and timestamps."""
         with open(path, 'w') as f:
-            f.write(f"# Enhanced Manual Blacklist - Updated {datetime.now()}\n")
+            f.write(f"# Enhanced Manual Blacklist - Updated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("#" + "="*100 + "\n")
             
             for ip_str, info in sorted(entries.items()):
@@ -335,11 +358,20 @@ class BlacklistManager:
                 city = geo.get('city', '') if geo else ''
                 location = f"{country}, {city}" if city else country
                 
+                # Format timestamps
+                first_seen = info.get('first_seen', datetime.now())
+                last_seen = info.get('last_seen', datetime.now())
+                date_added = info.get('date_added', datetime.now())
+                
+                first_str = first_seen.strftime('%Y-%m-%d %H:%M') if isinstance(first_seen, datetime) else 'Unknown'
+                last_str = last_seen.strftime('%Y-%m-%d %H:%M') if isinstance(last_seen, datetime) else 'Unknown'
+                added_str = date_added.strftime('%Y-%m-%d %H:%M') if isinstance(date_added, datetime) else 'Unknown'
+                
                 f.write(f"# IP: {ip_str} | {location} | {isp} | ")
                 f.write(f"Reason: {info.get('reason', 'Unknown')} | ")
                 f.write(f"Confidence: {info.get('confidence', 'unknown')} | ")
                 f.write(f"Events: {info.get('event_count', 0)} | ")
-                f.write(f"Added: {info.get('first_seen', datetime.now()).strftime('%Y-%m-%d %H:%M')}\n")
+                f.write(f"First: {first_str} | Last: {last_str} | Added: {added_str}\n")
                 f.write(f"{ip_str}\n")
     
     def _add_to_main_blacklists(self, new_ips_info: Dict):
@@ -357,7 +389,17 @@ class BlacklistManager:
         for ip_str, info in new_ips_info.items():
             geo = info.get('geolocation', {})
             location = f"{geo.get('country', 'Unknown')} ({geo.get('isp', 'Unknown ISP')})" if geo else "Unknown"
-            self.logger.warning(f"🔒 Blocking {ip_str} - {info['reason']} - {location}")
+            
+            # Format timestamps for logging
+            first_seen = info.get('first_seen')
+            last_seen = info.get('last_seen')
+            first_str = first_seen.strftime('%Y-%m-%d %H:%M') if isinstance(first_seen, datetime) else 'Unknown'
+            last_str = last_seen.strftime('%Y-%m-%d %H:%M') if isinstance(last_seen, datetime) else 'Unknown'
+            
+            self.logger.warning(
+                f"🔒 Blocking {ip_str} - {info['reason']} - {location} "
+                f"(First: {first_str}, Last: {last_str})"
+            )
     
     def _read_ips_from_file(self, filename: str) -> Set:
         """Parse IP addresses from blacklist file, ignoring comments."""

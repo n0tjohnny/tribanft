@@ -11,6 +11,7 @@ Detection logic:
 - Counts failed login events per IP within time window
 - Triggers when threshold exceeded (default: 20 events in 7 days)
 - High confidence - strong indicator of brute force attack
+- Uses timestamp helper to guarantee proper first_seen/last_seen
 
 Author: TribanFT Project
 License: GNU GPL v3
@@ -72,7 +73,10 @@ class FailedLoginDetector(BaseDetector):
         recent_events = self.calculate_time_window_events(
             filtered_events, self.config.time_window_minutes
         )
-        self.logger.info(f"After time window filtering ({self.config.time_window_minutes}min): {len(recent_events)} events")
+        self.logger.info(
+            f"After time window filtering ({self.config.time_window_minutes}min): "
+            f"{len(recent_events)} events"
+        )
         
         # Group by IP and check thresholds
         results = []
@@ -85,15 +89,16 @@ class FailedLoginDetector(BaseDetector):
             self.logger.info(f"IP {ip_str}: {event_count} events (threshold: {threshold})")
             
             if event_count >= threshold:
-                self.logger.warning(f"🚨 DETECTION: {ip_str} exceeded threshold with {event_count} failed logins")
-                results.append(DetectionResult(
-                    ip=ip_events[0].source_ip,
+                self.logger.warning(
+                    f"🚨 DETECTION: {ip_str} exceeded threshold with "
+                    f"{event_count} failed logins"
+                )
+                
+                # Use helper method to create result with guaranteed timestamps
+                results.append(self._create_detection_result(
+                    ip_events=ip_events,
                     reason=f"Failed login brute force detected: {event_count} failed logins",
-                    confidence=DetectionConfidence.HIGH,
-                    event_count=event_count,
-                    source_events=ip_events,
-                    first_seen=min(e.timestamp for e in ip_events),
-                    last_seen=max(e.timestamp for e in ip_events)
+                    confidence=DetectionConfidence.HIGH
                 ))
         
         return results

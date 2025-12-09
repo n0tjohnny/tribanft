@@ -11,6 +11,7 @@ Detection logic:
 - Counts port scan events per IP within time window
 - Triggers when threshold exceeded (default: 20 events in 7 days)
 - Medium confidence - automated scanning tools generate distinctive patterns
+- Uses timestamp helper to guarantee proper first_seen/last_seen
 
 Author: TribanFT Project
 License: GNU GPL v3
@@ -59,14 +60,15 @@ class PortScanDetector(BaseDetector):
         
         for ip_str, ip_events in grouped_events.items():
             if len(ip_events) >= config.port_scan_threshold:
-                results.append(DetectionResult(
-                    ip=ip_events[0].source_ip,
+                self.logger.warning(
+                    f"🚨 DETECTION: {ip_str} port scan with {len(ip_events)} attempts"
+                )
+                
+                # Use helper method to create result with guaranteed timestamps
+                results.append(self._create_detection_result(
+                    ip_events=ip_events,
                     reason=f"Port scan detected: {len(ip_events)} scan attempts",
-                    confidence=DetectionConfidence.MEDIUM,
-                    event_count=len(ip_events),
-                    source_events=ip_events,
-                    first_seen=min(e.timestamp for e in ip_events),
-                    last_seen=max(e.timestamp for e in ip_events)
+                    confidence=DetectionConfidence.MEDIUM
                 ))
         
         return results

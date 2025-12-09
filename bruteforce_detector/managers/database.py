@@ -38,29 +38,40 @@ class BlacklistDatabase:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source ON blacklist(source)")
             conn.commit()
     
-    def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
-        """Bulk add IPs for performance."""
-        added = 0
-        with sqlite3.connect(self.db_path) as conn:
-            for ip_str, info in ips_info.items():
-                try:
-                    ip = ipaddress.ip_address(ip_str)
-                    geo = info.get('geolocation', {})
-                    conn.execute("""INSERT OR REPLACE INTO blacklist VALUES 
-                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
-                        ip_str, ip.version, info.get('reason'), info.get('confidence'),
-                        info.get('event_count', 0), info.get('source'),
-                        geo.get('country') if geo else None,
-                        geo.get('city') if geo else None,
-                        geo.get('isp') if geo else None,
-                        info.get('first_seen').isoformat() if info.get('first_seen') else None,
-                        info.get('last_seen').isoformat() if info.get('last_seen') else None,
-                        datetime.now().isoformat(), json.dumps(info.get('metadata', {}))))
-                    added += 1
-                except Exception as e:
-                    self.logger.warning(f"Skipped {ip_str}: {e}")
-            conn.commit()
-        return added
+def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
+    """Bulk add IPs for performance."""
+    added = 0
+    with sqlite3.connect(self.db_path) as conn:
+        for ip_str, info in ips_info.items():
+            try:
+                ip = ipaddress.ip_address(ip_str)
+                geo = info.get('geolocation', {})
+                
+                # Convert datetime objects to ISO strings
+                first_seen = info.get('first_seen')
+                last_seen = info.get('last_seen')
+                date_added = info.get('date_added')
+                
+                first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else None
+                last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else None
+                added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
+                
+                conn.execute("""INSERT OR REPLACE INTO blacklist VALUES 
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+                    ip_str, ip.version, info.get('reason'), info.get('confidence'),
+                    info.get('event_count', 0), info.get('source'),
+                    geo.get('country') if geo else None,
+                    geo.get('city') if geo else None,
+                    geo.get('isp') if geo else None,
+                    first_str,  # Changed
+                    last_str,   # Changed
+                    added_str,  # Changed
+                    json.dumps(info.get('metadata', {}))))
+                added += 1
+            except Exception as e:
+                self.logger.warning(f"Skipped {ip_str}: {e}")
+        conn.commit()
+    return added
     
     def get_all_ips(self, ip_version: Optional[int] = None) -> Dict[str, Dict]:
         """Get all IPs from database."""
@@ -69,9 +80,22 @@ class BlacklistDatabase:
         ips = {}
         with sqlite3.connect(self.db_path) as conn:
             for row in conn.execute(query):
-                ips[row[0]] = {'ip': row[0], 'reason': row[2], 'confidence': row[3],
-                    'event_count': row[4], 'source': row[5],
-                    'geolocation': {'country': row[6], 'city': row[7], 'isp': row[8]} if row[6] else None}
+                # Parse timestamps back to datetime
+                first_seen = datetime.fromisoformat(row[9]) if row[9] else None
+                last_seen = datetime.fromisoformat(row[10]) if row[10] else None
+                date_added = datetime.fromisoformat(row[11]) if row[11] else None
+                
+                ips[row[0]] = {
+                    'ip': row[0], 
+                    'reason': row[2], 
+                    'confidence': row[3],
+                    'event_count': row[4], 
+                    'source': row[5],
+                    'first_seen': first_seen,
+                    'last_seen': last_seen,
+                    'date_added': date_added,
+                    'geolocation': {'country': row[6], 'city': row[7], 'isp': row[8]} if row[6] else None
+                }
         return ips
     
     def get_statistics(self) -> Dict:

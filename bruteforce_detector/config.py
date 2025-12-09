@@ -68,7 +68,7 @@ class DetectorConfig(BaseSettings):
     enable_nftables_update: bool = True
     
     # Performance settings
-    batch_size: int = 100  # NFTables batch operation size
+    batch_size: int = 1000  # NFTables batch operation size
     state_file: str = "/var/lib/tribanft/state.json"
     
     # Storage backend - file-based vs SQLite database
