@@ -103,7 +103,7 @@ class BruteForceDetectorEngine:
                 PreloginDetector(self.config),
                 PortScanDetector(self.config),
                 FailedLoginDetector(self.config),
-                CrowdSecDetector(self.config)
+                CrowdSecDetector(self.config, self.blacklist_manager)  # Added blacklist_manager for duplicate filtering
             ]
             
         except Exception as e:
