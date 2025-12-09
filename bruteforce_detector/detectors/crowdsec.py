@@ -1,18 +1,7 @@
 """
-TribanFT CrowdSec Detector
+TribanFT CrowdSec Detector - Fixed JSON Parsing
 
 Queries CrowdSec LAPI for active ban decisions and converts to detections.
-
-Integrates with CrowdSec via cscli command to fetch:
-- Currently active bans
-- Decision timestamps (created_at)
-- Scenario information (ssh-bf, http-scan, etc.)
-- Event counts
-
-Extracts real decision timestamps instead of using datetime.now().
-
-Author: TribanFT Project
-License: GNU GPL v3
 """
 
 import subprocess
@@ -26,30 +15,16 @@ from ..models import DetectionResult, EventType
 
 
 class CrowdSecDetector(BaseDetector):
-    """
-    Detector for IPs banned by CrowdSec.
-    
-    Queries CrowdSec's Local API via cscli to fetch active decisions
-    and converts them to DetectionResult objects.
-    """
+    """Detector for IPs banned by CrowdSec."""
     
     def __init__(self, config):
         """Initialize CrowdSec detector."""
-        super().__init__(config, EventType.CROWDSEC_BAN)
+        super().__init__(config, EventType.CROWDSEC_BLOCK)
         self.logger = logging.getLogger(__name__)
     
     def detect(self, events) -> List[DetectionResult]:
-        """
-        Query CrowdSec for active bans and convert to detections.
-        
-        Args:
-            events: Not used (CrowdSec maintains its own event store)
-            
-        Returns:
-            List of DetectionResult for each banned IP
-        """
+        """Query CrowdSec for active bans and convert to detections."""
         try:
-            # Query CrowdSec for decisions with metadata
             blocked_ips = self._get_crowdsec_blocked_ips()
             
             if not blocked_ips:
@@ -58,7 +33,6 @@ class CrowdSecDetector(BaseDetector):
             
             self.logger.info(f"Found {len(blocked_ips)} IPs from CrowdSec")
             
-            # Convert to DetectionResult objects
             detections = []
             for ip_str, metadata in blocked_ips.items():
                 try:
@@ -67,7 +41,7 @@ class CrowdSecDetector(BaseDetector):
                         reason=self._format_crowdsec_reason(metadata),
                         confidence='high',
                         event_count=metadata.get('events', 1),
-                        source_events=[],  # CrowdSec decisions don't have SecurityEvent objects
+                        source_events=[],
                         first_seen=metadata.get('timestamp'),
                         last_seen=metadata.get('timestamp')
                     )
@@ -89,14 +63,9 @@ class CrowdSecDetector(BaseDetector):
         """
         Query CrowdSec LAPI for active ban decisions with metadata.
         
-        Executes: cscli decisions list -o json
-        Parses JSON response to extract IP, timestamps, scenario, events.
-        
-        Returns:
-            Dict mapping IP address -> {timestamp, reason, events, scenario}
+        FIXED: Properly parse the JSON structure from cscli decisions list -o json
         """
         try:
-            # Execute cscli with JSON output
             result = subprocess.run(
                 ['cscli', 'decisions', 'list', '-o', 'json'],
                 capture_output=True,
@@ -110,58 +79,71 @@ class CrowdSecDetector(BaseDetector):
             
             # Parse JSON response
             try:
-                decisions = json.loads(result.stdout)
+                decisions_data = json.loads(result.stdout)
             except json.JSONDecodeError as e:
                 self.logger.error(f"Failed to parse cscli JSON output: {e}")
                 return {}
             
-            if not decisions:
+            if not decisions_data:
                 return {}
             
-            # Extract IPs with metadata
+            # Debug: Log structure
+            self.logger.debug(f"CrowdSec returned {len(decisions_data)} decision entries")
+            
             blocked_ips = {}
             
-            for decision in decisions:
+            # The JSON is an array of decision objects
+            for decision_entry in decisions_data:
                 try:
-                    # Extract IP from scope:value format
-                    # CrowdSec returns "Ip:192.168.1.1" or just "192.168.1.1"
-                    scope_value = decision.get('scope_value') or decision.get('value', '')
-                    if not scope_value:
+                    # Each entry has a 'decisions' array and a 'source' object
+                    decisions_list = decision_entry.get('decisions', [])
+                    source = decision_entry.get('source', {})
+                    
+                    # Get IP from source object
+                    ip_str = source.get('ip') or source.get('value', '')
+                    
+                    if not ip_str:
+                        self.logger.debug(f"No IP found in entry: {decision_entry.keys()}")
                         continue
                     
-                    # Remove "Ip:" prefix if present
-                    ip_str = scope_value.replace('Ip:', '').strip()
-                    
-                    # Parse creation timestamp
-                    created_at = decision.get('created_at')
-                    timestamp = None
+                    # Parse creation timestamp from decision entry
+                    created_at = decision_entry.get('created_at') or decision_entry.get('start_at')
+                    timestamp = datetime.now()
                     
                     if created_at:
                         try:
-                            # CrowdSec uses ISO 8601 format: "2024-12-08T14:30:00Z"
-                            # Handle both with and without 'Z' suffix
                             if created_at.endswith('Z'):
                                 timestamp = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
                             else:
                                 timestamp = datetime.fromisoformat(created_at)
                         except (ValueError, AttributeError) as e:
                             self.logger.debug(f"Timestamp parse error for {ip_str}: {e}")
-                            timestamp = datetime.now()
-                    else:
-                        timestamp = datetime.now()
                     
-                    # Store complete metadata
+                    # Get decision metadata
+                    scenario = decision_entry.get('scenario', 'Unknown')
+                    events_count = decision_entry.get('events_count', 1)
+                    
+                    # Get decision type and duration from decisions array
+                    decision_type = 'ban'
+                    duration = 'Unknown'
+                    if decisions_list:
+                        first_decision = decisions_list[0]
+                        decision_type = first_decision.get('type', 'ban')
+                        duration = first_decision.get('duration', 'Unknown')
+                    
                     blocked_ips[ip_str] = {
                         'timestamp': timestamp,
-                        'reason': decision.get('reason', 'Unknown'),
-                        'events': int(decision.get('events_count', 1)),
-                        'scenario': decision.get('scenario', 'Unknown'),
-                        'type': decision.get('type', 'ban'),
-                        'duration': decision.get('duration', 'Unknown')
+                        'reason': scenario,
+                        'events': events_count,
+                        'scenario': scenario,
+                        'type': decision_type,
+                        'duration': duration
                     }
                     
+                    self.logger.debug(f"Parsed CrowdSec IP: {ip_str} ({scenario}, {events_count} events)")
+                    
                 except Exception as e:
-                    self.logger.warning(f"Error parsing CrowdSec decision: {e}")
+                    self.logger.warning(f"Error parsing CrowdSec decision entry: {e}")
                     continue
             
             return blocked_ips
@@ -177,23 +159,11 @@ class CrowdSecDetector(BaseDetector):
             return {}
     
     def _format_crowdsec_reason(self, metadata: Dict) -> str:
-        """
-        Format human-readable blocking reason from CrowdSec metadata.
-        
-        Converts scenario names like "crowdsecurity/ssh-slow-bf" to
-        readable format: "SSH Slow Bf (11 events)"
-        
-        Args:
-            metadata: Dict with scenario, events, etc.
-            
-        Returns:
-            Formatted reason string
-        """
+        """Format human-readable blocking reason from CrowdSec metadata."""
         scenario = metadata.get('scenario', 'Unknown')
         events = metadata.get('events', 1)
         
         # Make scenario more readable
-        # "crowdsecurity/ssh-slow-bf" -> "SSH Slow Bf"
         scenario_name = scenario.replace('crowdsecurity/', '').replace('-', ' ').title()
         
-        return f"IP blocked by CrowdSec - {scenario_name} ({events} events)"
+        return f"CrowdSec: {scenario_name} ({events} events)"

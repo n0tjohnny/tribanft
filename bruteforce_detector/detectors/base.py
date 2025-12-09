@@ -21,7 +21,7 @@ from typing import List, Optional
 from datetime import datetime
 from abc import ABC, abstractmethod
 
-from ..models import DetectionResult, SecurityEvent, EventType, ConfidenceLevel
+from ..models import DetectionResult, SecurityEvent, EventType, DetectionConfidence
 
 
 class BaseDetector(ABC):
@@ -43,6 +43,18 @@ class BaseDetector(ABC):
         self.config = config
         self.event_type = event_type
         self.logger = logging.getLogger(__name__)
+        
+        # Map event types to their config enable flags
+        enable_map = {
+            EventType.PRELOGIN_INVALID: config.enable_prelogin_detection,
+            EventType.FAILED_LOGIN: config.enable_failed_login_detection,
+            EventType.PORT_SCAN: config.enable_port_scan_detection,
+            EventType.CROWDSEC_BLOCK: config.enable_crowdsec_integration,
+        }
+        
+        # Set enabled flag based on event type
+        self.enabled = enable_map.get(event_type, True)
+        self.name = self.__class__.__name__
     
     @abstractmethod
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
@@ -118,11 +130,11 @@ class BaseDetector(ABC):
             
             # Map confidence string to enum
             confidence_map = {
-                'high': ConfidenceLevel.HIGH,
-                'medium': ConfidenceLevel.MEDIUM,
-                'low': ConfidenceLevel.LOW
+                'high': DetectionConfidence.HIGH,
+                'medium': DetectionConfidence.MEDIUM,
+                'low': DetectionConfidence.LOW
             }
-            confidence_level = confidence_map.get(confidence.lower(), ConfidenceLevel.MEDIUM)
+            confidence_level = confidence_map.get(confidence.lower(), DetectionConfidence.MEDIUM)
             
             return DetectionResult(
                 ip=ip,

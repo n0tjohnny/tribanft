@@ -100,10 +100,10 @@ class BruteForceDetectorEngine:
             
             # Initialize detectors
             self.detectors = [
-                PreloginDetector(self.config),
-                PortScanDetector(self.config),
-                FailedLoginDetector(self.config),
-                CrowdSecDetector(self.config)
+                PreloginDetector(self.whitelist_manager),
+                PortScanDetector(self.whitelist_manager),
+                FailedLoginDetector(self.whitelist_manager),
+                CrowdSecDetector(self.whitelist_manager)
             ]
             
         except Exception as e:
