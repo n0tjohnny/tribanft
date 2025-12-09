@@ -295,20 +295,31 @@ def main():
             print("No manual blacklist file found")
         sys.exit(0)
     elif args.sync_files:
-        # Use engine's logger and managers
         engine.logger.info("🔄 Manual database → file sync requested")
         
         try:
-            # Read IPv4 from database via the adapter
-            ipv4_data = engine.blacklist_manager.writer.read_blacklist(engine.config.blacklist_ipv4_file)
-            engine.blacklist_manager.writer.write_blacklist(engine.config.blacklist_ipv4_file, ipv4_data, 0)
-            
-            # Read IPv6 from database if exists
-            ipv6_data = engine.blacklist_manager.writer.read_blacklist(engine.config.blacklist_ipv6_file)
-            if ipv6_data:
-                engine.blacklist_manager.writer.write_blacklist(engine.config.blacklist_ipv6_file, ipv6_data, 0)
-            
-            engine.logger.info(f"✅ Sync complete: {len(ipv4_data)} IPv4, {len(ipv6_data)} IPv6")
+            # Use the adapter's export_to_file method which is designed for this
+            if engine.config.use_database:
+                # Export IPv4
+                engine.blacklist_manager.writer.export_to_file(
+                    engine.config.blacklist_ipv4_file, 
+                    ip_version=4
+                )
+                
+                # Export IPv6 if any exist
+                from bruteforce_detector.managers.database import BlacklistDatabase
+                db = BlacklistDatabase()
+                stats = db.get_statistics()
+                if stats.get('ipv6', 0) > 0:
+                    engine.blacklist_manager.writer.export_to_file(
+                        engine.config.blacklist_ipv6_file,
+                        ip_version=6
+                    )
+                
+                engine.logger.info("✅ Database → file sync completed successfully")
+            else:
+                engine.logger.warning("⚠️  Not using database, sync not needed")
+                
         except Exception as e:
             engine.logger.error(f"❌ Sync failed: {e}")
             sys.exit(1)
