@@ -258,7 +258,7 @@ class BlacklistManager:
         
         Extracts and structures all metadata from detections for storage.
         Filters out whitelisted IPs before preparation.
-        NOW INCLUDES: Guaranteed timestamps (first_seen, last_seen, date_added)
+        NOW INCLUDES: Guaranteed timestamps + event_types extraction
         """
         now = datetime.now()
         
@@ -269,11 +269,12 @@ class BlacklistManager:
                 'confidence': d.confidence.value,
                 'event_count': d.event_count,
                 'geolocation': d.geolocation,
-                'first_seen': d.first_seen or now,      # From events
-                'last_seen': d.last_seen or now,        # From events
-                'date_added': now,                       # When added to blacklist
-                'timestamp': now,                        # Legacy compatibility
-                'source': 'automatic'
+                'first_seen': d.first_seen or now,
+                'last_seen': d.last_seen or now,
+                'date_added': now,
+                'timestamp': now,
+                'source': 'automatic',
+                'event_types': list(set(e.event_type.value for e in d.source_events)) if d.source_events else []
             }
             for d in detections if not self.whitelist_manager.is_whitelisted(d.ip)
         }

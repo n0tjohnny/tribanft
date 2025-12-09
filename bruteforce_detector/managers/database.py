@@ -39,7 +39,7 @@ class BlacklistDatabase:
             conn.commit()
     
     def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
-        """Bulk add IPs for performance with proper datetime handling."""
+        """Bulk add IPs for performance."""
         added = 0
         with sqlite3.connect(self.db_path) as conn:
             for ip_str, info in ips_info.items():
@@ -56,6 +56,11 @@ class BlacklistDatabase:
                     last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else None
                     added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
                     
+                    # Store event_types in metadata
+                    metadata = info.get('metadata', {})
+                    if 'event_types' not in metadata and info.get('event_types'):
+                        metadata['event_types'] = info['event_types']
+                    
                     conn.execute("""INSERT OR REPLACE INTO blacklist VALUES 
                         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
                         ip_str, ip.version, info.get('reason'), info.get('confidence'),
@@ -66,7 +71,7 @@ class BlacklistDatabase:
                         first_str,
                         last_str,
                         added_str,
-                        json.dumps(info.get('metadata', {}))))
+                        json.dumps(metadata)))
                     added += 1
                 except Exception as e:
                     self.logger.warning(f"Skipped {ip_str}: {e}")
@@ -74,11 +79,9 @@ class BlacklistDatabase:
         return added
     
     def get_all_ips(self, ip_version: Optional[int] = None) -> Dict[str, Dict]:
-        """Get all IPs from database with datetime parsing."""
+        """Get all IPs from database."""
         query = "SELECT * FROM blacklist"
-        if ip_version: 
-            query += f" WHERE ip_version = {ip_version}"
-        
+        if ip_version: query += f" WHERE ip_version = {ip_version}"
         ips = {}
         with sqlite3.connect(self.db_path) as conn:
             for row in conn.execute(query):
@@ -86,6 +89,16 @@ class BlacklistDatabase:
                 first_seen = datetime.fromisoformat(row[9]) if row[9] else None
                 last_seen = datetime.fromisoformat(row[10]) if row[10] else None
                 date_added = datetime.fromisoformat(row[11]) if row[11] else None
+                
+                # Parse metadata to extract event_types
+                metadata = {}
+                event_types = []
+                try:
+                    if row[12]:
+                        metadata = json.loads(row[12])
+                        event_types = metadata.get('event_types', [])
+                except json.JSONDecodeError:
+                    pass
                 
                 ips[row[0]] = {
                     'ip': row[0], 
@@ -96,6 +109,8 @@ class BlacklistDatabase:
                     'first_seen': first_seen,
                     'last_seen': last_seen,
                     'date_added': date_added,
+                    'event_types': event_types,
+                    'metadata': metadata,
                     'geolocation': {'country': row[6], 'city': row[7], 'isp': row[8]} if row[6] else None
                 }
         return ips
