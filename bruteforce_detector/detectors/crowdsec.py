@@ -21,10 +21,44 @@ from ..models import DetectionResult, EventType
 class CrowdSecDetector(BaseDetector):
     """Detector for IPs banned by CrowdSec."""
     
-    def __init__(self, config):
-        """Initialize CrowdSec detector."""
+    def __init__(self, config, blacklist_manager=None):
+        """
+        Initialize CrowdSec detector.
+        
+        Args:
+            config: Configuration object
+            blacklist_manager: Optional BlacklistManager for checking existing IPs
+        """
         super().__init__(config, EventType.CROWDSEC_BLOCK)
         self.logger = logging.getLogger(__name__)
+        self.blacklist_manager = blacklist_manager
+    
+    def _get_existing_blocked_ips(self) -> set:
+        """
+        Get set of already-blocked IP addresses to avoid re-detection.
+        
+        Returns:
+            Set of IP address strings currently in blacklist
+        """
+        if not self.blacklist_manager:
+            return set()
+        
+        try:
+            # Get all blocked IPs from blacklist manager
+            all_blocked = self.blacklist_manager.get_all_blacklisted_ips()
+            
+            # Convert IP objects to strings for comparison
+            blocked_strs = set()
+            for ip in all_blocked.get('ipv4', set()):
+                blocked_strs.add(str(ip))
+            for ip in all_blocked.get('ipv6', set()):
+                blocked_strs.add(str(ip))
+            
+            return blocked_strs
+            
+        except Exception as e:
+            self.logger.warning(f"Error fetching existing blacklist: {e}")
+            return set()
     
     def detect(self, events) -> List[DetectionResult]:
         """Query CrowdSec for active bans and historical alerts, convert to detections."""
@@ -46,7 +80,30 @@ class CrowdSecDetector(BaseDetector):
                 self.logger.debug("No CrowdSec decisions or alerts found")
                 return []
             
-            self.logger.info(f"Found {len(blocked_ips)} total IPs from CrowdSec (decisions + alerts)")
+            self.logger.debug(f"Found {len(blocked_ips)} total IPs from CrowdSec (decisions + alerts)")
+            
+            # Filter out already-blocked IPs to avoid re-detection
+            existing_blocked = self._get_existing_blocked_ips()
+            if existing_blocked:
+                original_count = len(blocked_ips)
+                blocked_ips = {
+                    ip: meta for ip, meta in blocked_ips.items() 
+                    if ip not in existing_blocked
+                }
+                filtered_count = original_count - len(blocked_ips)
+                
+                if filtered_count > 0:
+                    self.logger.debug(
+                        f"Filtered {filtered_count} already-blocked IPs "
+                        f"({len(blocked_ips)} new IPs remain)"
+                    )
+            
+            # If all IPs were already blocked, return empty
+            if not blocked_ips:
+                self.logger.info("All CrowdSec IPs already in blacklist (no new detections)")
+                return []
+            
+            self.logger.info(f"Found {len(blocked_ips)} NEW IPs from CrowdSec to block")
             
             detections = []
             for ip_str, metadata in blocked_ips.items():
