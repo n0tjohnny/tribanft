@@ -295,25 +295,22 @@ def main():
             print("No manual blacklist file found")
         sys.exit(0)
     elif args.sync_files:
-        logger.info("🔄 Manual database → file sync requested")
+        # Use engine's logger and managers
+        engine.logger.info("🔄 Manual database → file sync requested")
         
-        # Ensure all managers are initialized
-        blacklist_manager = BlacklistManager(whitelist_manager, geolocation_manager)
-        
-        # Force read all IPs from database and write to file
         try:
-            # Read IPv4 from database
-            ipv4_data = blacklist_manager.writer.read_blacklist(config.blacklist_ipv4_file)
-            blacklist_manager.writer.write_blacklist(config.blacklist_ipv4_file, ipv4_data, 0)
+            # Read IPv4 from database via the adapter
+            ipv4_data = engine.blacklist_manager.writer.read_blacklist(engine.config.blacklist_ipv4_file)
+            engine.blacklist_manager.writer.write_blacklist(engine.config.blacklist_ipv4_file, ipv4_data, 0)
             
             # Read IPv6 from database if exists
-            ipv6_data = blacklist_manager.writer.read_blacklist(config.blacklist_ipv6_file)
+            ipv6_data = engine.blacklist_manager.writer.read_blacklist(engine.config.blacklist_ipv6_file)
             if ipv6_data:
-                blacklist_manager.writer.write_blacklist(config.blacklist_ipv6_file, ipv6_data, 0)
+                engine.blacklist_manager.writer.write_blacklist(engine.config.blacklist_ipv6_file, ipv6_data, 0)
             
-            logger.info(f"✅ Sync complete: {len(ipv4_data)} IPv4, {len(ipv6_data)} IPv6")
+            engine.logger.info(f"✅ Sync complete: {len(ipv4_data)} IPv4, {len(ipv6_data)} IPv6")
         except Exception as e:
-            logger.error(f"❌ Sync failed: {e}")
+            engine.logger.error(f"❌ Sync failed: {e}")
             sys.exit(1)
     else:
         # Default action: run detection
