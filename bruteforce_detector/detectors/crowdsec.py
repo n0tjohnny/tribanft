@@ -1,7 +1,11 @@
 """
-TribanFT CrowdSec Detector - Fixed JSON Parsing
+TribanFT CrowdSec Detector - Fixed JSON Parsing with Historical Alerts
 
-Queries CrowdSec LAPI for active ban decisions and converts to detections.
+Queries CrowdSec LAPI for:
+- Active ban decisions (cscli decisions list)
+- Historical alerts (cscli alerts list)
+
+Extracts IP, scenario, events, timestamp, country, and ISP data.
 """
 
 import subprocess
@@ -23,15 +27,26 @@ class CrowdSecDetector(BaseDetector):
         self.logger = logging.getLogger(__name__)
     
     def detect(self, events) -> List[DetectionResult]:
-        """Query CrowdSec for active bans and convert to detections."""
+        """Query CrowdSec for active bans and historical alerts, convert to detections."""
         try:
+            # Query active decisions
             blocked_ips = self._get_crowdsec_blocked_ips()
+            self.logger.debug(f"Found {len(blocked_ips)} IPs from active decisions")
+            
+            # Query historical alerts
+            alert_ips = self._get_crowdsec_alerts()
+            self.logger.debug(f"Found {len(alert_ips)} IPs from historical alerts")
+            
+            # Merge alerts into blocked_ips (decisions take precedence)
+            for ip_str, alert_metadata in alert_ips.items():
+                if ip_str not in blocked_ips:
+                    blocked_ips[ip_str] = alert_metadata
             
             if not blocked_ips:
-                self.logger.debug("No CrowdSec decisions found")
+                self.logger.debug("No CrowdSec decisions or alerts found")
                 return []
             
-            self.logger.info(f"Found {len(blocked_ips)} IPs from CrowdSec")
+            self.logger.info(f"Found {len(blocked_ips)} total IPs from CrowdSec (decisions + alerts)")
             
             detections = []
             for ip_str, metadata in blocked_ips.items():
@@ -47,6 +62,13 @@ class CrowdSecDetector(BaseDetector):
                     )
                     
                     if result:
+                        # Add geolocation from CrowdSec data if available
+                        if metadata.get('country') or metadata.get('as_name'):
+                            result.geolocation = {
+                                'country': metadata.get('country', 'Unknown'),
+                                'isp': metadata.get('as_name', 'Unknown ISP'),
+                                'city': ''  # CrowdSec doesn't provide city
+                            }
                         detections.append(result)
                         
                 except Exception as e:
@@ -156,6 +178,120 @@ class CrowdSecDetector(BaseDetector):
             return {}
         except Exception as e:
             self.logger.error(f"Error querying CrowdSec: {e}")
+            return {}
+    
+    def _get_crowdsec_alerts(self) -> Dict[str, Dict]:
+        """
+        Query CrowdSec for historical alerts with metadata.
+        
+        Uses: cscli alerts list -o json
+        Extracts: IP, scenario, events, timestamp, country, AS/ISP
+        """
+        try:
+            result = subprocess.run(
+                ['cscli', 'alerts', 'list', '-o', 'json'],
+                capture_output=True,
+                text=True,
+                timeout=30  # Alerts can take longer than decisions
+            )
+            
+            if result.returncode != 0:
+                self.logger.error(f"cscli alerts command failed: {result.stderr}")
+                return {}
+            
+            # Parse JSON response
+            try:
+                alerts_data = json.loads(result.stdout)
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Failed to parse cscli alerts JSON: {e}")
+                return {}
+            
+            if not alerts_data:
+                return {}
+            
+            self.logger.debug(f"CrowdSec returned {len(alerts_data)} alert entries")
+            
+            alert_ips = {}
+            
+            # Parse alert JSON structure
+            for alert_entry in alerts_data:
+                try:
+                    # Get IP from source
+                    source = alert_entry.get('source', {})
+                    ip_str = source.get('ip') or source.get('value', '')
+                    
+                    if not ip_str:
+                        continue
+                    
+                    # Remove "Ip:" prefix if present
+                    ip_str = ip_str.replace('Ip:', '').strip()
+                    
+                    # Parse creation timestamp
+                    created_at = alert_entry.get('created_at') or alert_entry.get('start_at')
+                    timestamp = datetime.now()
+                    
+                    if created_at:
+                        try:
+                            if created_at.endswith('Z'):
+                                timestamp = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            else:
+                                timestamp = datetime.fromisoformat(created_at)
+                        except (ValueError, AttributeError) as e:
+                            self.logger.debug(f"Alert timestamp parse error for {ip_str}: {e}")
+                    
+                    # Extract metadata
+                    scenario = alert_entry.get('scenario', 'Unknown')
+                    events_count = alert_entry.get('events_count', 1)
+                    
+                    # Extract geolocation data
+                    country = source.get('cn', '')  # Country code
+                    as_number = source.get('as_number', '')
+                    as_name = source.get('as_name', '')
+                    
+                    # Format AS info (e.g., "18779 EGIHOSTING")
+                    if as_number and as_name:
+                        as_info = f"{as_number} {as_name}"
+                    elif as_name:
+                        as_info = as_name
+                    else:
+                        as_info = 'Unknown ISP'
+                    
+                    # Get decision info if available
+                    decisions = alert_entry.get('decisions', [])
+                    decision_type = 'ban'
+                    if decisions:
+                        decision_type = decisions[0].get('type', 'ban')
+                    
+                    alert_ips[ip_str] = {
+                        'timestamp': timestamp,
+                        'reason': scenario,
+                        'events': events_count,
+                        'scenario': scenario,
+                        'type': decision_type,
+                        'country': country,
+                        'as_name': as_info,
+                        'source': 'alert'  # Mark as from alerts vs decisions
+                    }
+                    
+                    self.logger.debug(
+                        f"Parsed CrowdSec alert: {ip_str} ({scenario}, {events_count} events, "
+                        f"{country}, {as_info})"
+                    )
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error parsing CrowdSec alert entry: {e}")
+                    continue
+            
+            return alert_ips
+            
+        except subprocess.TimeoutExpired:
+            self.logger.error("cscli alerts command timed out after 30 seconds")
+            return {}
+        except FileNotFoundError:
+            self.logger.error("cscli command not found - is CrowdSec installed?")
+            return {}
+        except Exception as e:
+            self.logger.error(f"Error querying CrowdSec alerts: {e}")
             return {}
     
     def _format_crowdsec_reason(self, metadata: Dict) -> str:
