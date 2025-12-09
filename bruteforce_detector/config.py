@@ -26,7 +26,9 @@ Author: TribanFT Project
 License: GNU GPL v3
 """
 
-from pydantic import BaseSettings
+#from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import List, Set, Optional
 from pathlib import Path
 import ipaddress
@@ -75,6 +77,10 @@ class DetectorConfig(BaseSettings):
     # Database recommended for >10k IPs for better performance
     use_database: bool = False
     database_path: str = "/var/lib/tribanft/blacklist.db"
+    sync_to_file: bool = Field(
+    default=True,
+    description="When using database, also sync changes to blacklist files for compatibility"
+    )
 
     class Config:
         """Pydantic configuration"""

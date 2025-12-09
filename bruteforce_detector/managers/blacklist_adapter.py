@@ -50,11 +50,15 @@ class BlacklistAdapter:
         self.logger = logging.getLogger(__name__)
         self.use_database = use_database
         
+        # Always create file writer for sync capability
+        self.file_writer = BlacklistWriter(config)
+        
         if use_database:
             self.db = BlacklistDatabase()
             self.logger.info("📊 Using SQLite backend for blacklist")
+            if getattr(config, 'sync_to_file', True):
+                self.logger.info("📄 File sync ENABLED (database ↔ file)")
         else:
-            self.writer = BlacklistWriter(config)
             self.logger.info("📄 Using file backend for blacklist")
     
     def read_blacklist(self, filename: str) -> Dict[str, Dict]:
@@ -77,7 +81,7 @@ class BlacklistAdapter:
             
             return self.db.get_all_ips(ip_version=ip_version)
         else:
-            return self.writer.read_blacklist(filename)
+            return self.file_writer.read_blacklist(filename)
     
     def write_blacklist(self, filename: str, ips_info: Dict[str, Dict], new_count: int = 0):
         """
@@ -137,8 +141,17 @@ class BlacklistAdapter:
             if stats['total_ips'] > 0:
                 geo_pct = (with_geo / stats['total_ips']) * 100
                 self.logger.info(f"   With Geo: {with_geo} ({geo_pct:.1f}%)")
+                
+                # SYNC TO FILE WHEN ENABLED
+                if getattr(self.config, 'sync_to_file', True):
+                    self.logger.debug(f"📄 Syncing {len(ips_info)} IPs to {filename}")
+                    try:
+                        self.file_writer.write_blacklist(filename, ips_info, new_count)
+                        self.logger.debug(f"✅ File sync completed for {filename}")
+                    except Exception as e:
+                        self.logger.warning(f"⚠️  File sync failed: {e}")
         else:
-            self.writer.write_blacklist(filename, ips_info, new_count)
+            self.file_writer.write_blacklist(filename, ips_info, new_count)
     
     def get_manual_ips(self, manual_blacklist_file: str) -> Set[str]:
         """
@@ -158,7 +171,7 @@ class BlacklistAdapter:
                 if info.get('source') == 'manual'
             }
         else:
-            return self.writer.get_manual_ips(manual_blacklist_file)
+            return self.file_writer.get_manual_ips(manual_blacklist_file)
     
     def migrate_from_files(self):
         """
@@ -266,8 +279,8 @@ class BlacklistAdapter:
             return self.db.get_statistics()
         else:
             # Calculate basic stats for file backend
-            ipv4 = self.writer.read_blacklist(self.config.blacklist_ipv4_file)
-            ipv6 = self.writer.read_blacklist(self.config.blacklist_ipv6_file)
+            ipv4 = self.file_writer.read_blacklist(self.config.blacklist_ipv4_file)
+            ipv6 = self.file_writer.read_blacklist(self.config.blacklist_ipv6_file)
             
             return {
                 'total_ips': len(ipv4) + len(ipv6),

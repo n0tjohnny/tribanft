@@ -247,6 +247,38 @@ class BlacklistManager:
         print("-" * 120)
         print(f"📊 Total: {total} (IPv4: {len(blacklisted_ips['ipv4'])}, IPv6: {len(blacklisted_ips['ipv6'])})")
         print(f"📋 Manual IPs: {manual}")
+
+    def sync_database_to_files(self):
+        """
+        Force synchronization from database to blacklist files.
+        
+        Useful for manual sync or recovery scenarios.
+        Returns True if sync successful.
+        """
+        if not self.config.use_database:
+            self.logger.warning("⚠️  Not using database, nothing to sync")
+            return True
+        
+        self.logger.info("🔄 Forcing database → file sync...")
+        
+        try:
+            # Get all IPv4 entries
+            ipv4_data = self.writer.read_blacklist(self.config.blacklist_ipv4_file)
+            
+            # Write to file using the adapter's sync logic
+            self.writer.write_blacklist(self.config.blacklist_ipv4_file, ipv4_data, 0)
+            
+            # Optional: Also sync IPv6
+            ipv6_data = self.writer.read_blacklist(self.config.blacklist_ipv6_file)
+            if ipv6_data:
+                self.writer.write_blacklist(self.config.blacklist_ipv6_file, ipv6_data, 0)
+            
+            self.logger.info(f"✅ Database sync complete: {len(ipv4_data)} IPv4, {len(ipv6_data)} IPv6")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Database sync failed: {e}")
+            return False
     
     # ========================================================================
     # INTERNAL HELPERS

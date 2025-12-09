@@ -1,0 +1,2 @@
+[console_scripts]
+tribanft = bruteforce_detector.main:main

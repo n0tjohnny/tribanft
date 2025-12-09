@@ -235,6 +235,7 @@ def main():
     parser.add_argument('--show-blacklist', action='store_true', help='Show current blacklist')
     parser.add_argument('--show-manual', action='store_true', help='Show manual blacklist only')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--sync-files', action='store_true', help='Force sync database to blacklist files')
     
     args = parser.parse_args()
     
@@ -293,12 +294,32 @@ def main():
         else:
             print("No manual blacklist file found")
         sys.exit(0)
+    elif args.sync_files:
+        logger.info("🔄 Manual database → file sync requested")
+        
+        # Ensure all managers are initialized
+        blacklist_manager = BlacklistManager(whitelist_manager, geolocation_manager)
+        
+        # Force read all IPs from database and write to file
+        try:
+            # Read IPv4 from database
+            ipv4_data = blacklist_manager.writer.read_blacklist(config.blacklist_ipv4_file)
+            blacklist_manager.writer.write_blacklist(config.blacklist_ipv4_file, ipv4_data, 0)
+            
+            # Read IPv6 from database if exists
+            ipv6_data = blacklist_manager.writer.read_blacklist(config.blacklist_ipv6_file)
+            if ipv6_data:
+                blacklist_manager.writer.write_blacklist(config.blacklist_ipv6_file, ipv6_data, 0)
+            
+            logger.info(f"✅ Sync complete: {len(ipv4_data)} IPv4, {len(ipv6_data)} IPv6")
+        except Exception as e:
+            logger.error(f"❌ Sync failed: {e}")
+            sys.exit(1)
     else:
         # Default action: run detection
         if not args.detect:
             print("No action specified. Running detection (use --detect to explicitly run)")
         engine.run_detection()
-
 
 if __name__ == "__main__":
     main()
