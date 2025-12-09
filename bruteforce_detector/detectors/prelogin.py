@@ -33,8 +33,8 @@ class PreloginDetector(BaseDetector):
     
     def __init__(self, config):
         """Initialize prelogin detector with configuration."""
-        super().__init__(config, EventType.PRELOGIN_BRUTEFORCE)
-        self.threshold = config.prelogin_bruteforce_threshold
+        super().__init__(config, EventType.PRELOGIN_INVALID)
+        self.threshold = config.prelogin_pattern_threshold
     
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """
@@ -43,7 +43,7 @@ class PreloginDetector(BaseDetector):
         Groups events by IP and counts occurrences within time window.
         
         Args:
-            events: List of SecurityEvent objects (filtered for PRELOGIN_BRUTEFORCE)
+            events: List of SecurityEvent objects (filtered for PRELOGIN_INVALID)
             
         Returns:
             List of DetectionResult for IPs exceeding threshold
@@ -51,7 +51,7 @@ class PreloginDetector(BaseDetector):
         # Group events by source IP
         events_by_ip = defaultdict(list)
         for event in events:
-            if event.event_type == EventType.PRELOGIN_BRUTEFORCE:
+            if event.event_type == EventType.PRELOGIN_INVALID:
                 events_by_ip[event.source_ip].append(event)
         
         detections = []
