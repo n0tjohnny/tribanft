@@ -38,45 +38,47 @@ class BlacklistDatabase:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source ON blacklist(source)")
             conn.commit()
     
-def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
-    """Bulk add IPs for performance."""
-    added = 0
-    with sqlite3.connect(self.db_path) as conn:
-        for ip_str, info in ips_info.items():
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                geo = info.get('geolocation', {})
-                
-                # Convert datetime objects to ISO strings
-                first_seen = info.get('first_seen')
-                last_seen = info.get('last_seen')
-                date_added = info.get('date_added')
-                
-                first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else None
-                last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else None
-                added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
-                
-                conn.execute("""INSERT OR REPLACE INTO blacklist VALUES 
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
-                    ip_str, ip.version, info.get('reason'), info.get('confidence'),
-                    info.get('event_count', 0), info.get('source'),
-                    geo.get('country') if geo else None,
-                    geo.get('city') if geo else None,
-                    geo.get('isp') if geo else None,
-                    first_str,  # Changed
-                    last_str,   # Changed
-                    added_str,  # Changed
-                    json.dumps(info.get('metadata', {}))))
-                added += 1
-            except Exception as e:
-                self.logger.warning(f"Skipped {ip_str}: {e}")
-        conn.commit()
-    return added
+    def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
+        """Bulk add IPs for performance with proper datetime handling."""
+        added = 0
+        with sqlite3.connect(self.db_path) as conn:
+            for ip_str, info in ips_info.items():
+                try:
+                    ip = ipaddress.ip_address(ip_str)
+                    geo = info.get('geolocation', {})
+                    
+                    # Convert datetime objects to ISO strings
+                    first_seen = info.get('first_seen')
+                    last_seen = info.get('last_seen')
+                    date_added = info.get('date_added')
+                    
+                    first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else None
+                    last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else None
+                    added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
+                    
+                    conn.execute("""INSERT OR REPLACE INTO blacklist VALUES 
+                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
+                        ip_str, ip.version, info.get('reason'), info.get('confidence'),
+                        info.get('event_count', 0), info.get('source'),
+                        geo.get('country') if geo else None,
+                        geo.get('city') if geo else None,
+                        geo.get('isp') if geo else None,
+                        first_str,
+                        last_str,
+                        added_str,
+                        json.dumps(info.get('metadata', {}))))
+                    added += 1
+                except Exception as e:
+                    self.logger.warning(f"Skipped {ip_str}: {e}")
+            conn.commit()
+        return added
     
     def get_all_ips(self, ip_version: Optional[int] = None) -> Dict[str, Dict]:
-        """Get all IPs from database."""
+        """Get all IPs from database with datetime parsing."""
         query = "SELECT * FROM blacklist"
-        if ip_version: query += f" WHERE ip_version = {ip_version}"
+        if ip_version: 
+            query += f" WHERE ip_version = {ip_version}"
+        
         ips = {}
         with sqlite3.connect(self.db_path) as conn:
             for row in conn.execute(query):
