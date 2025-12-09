@@ -1,74 +1,90 @@
 """
 TribanFT Port Scan Detector
 
-Detects port scanning activity from attackers probing for open services.
+Detects port scanning activity.
 
-Attack pattern:
-Attackers systematically probe multiple ports on target systems to identify
-vulnerable services. These attempts are logged by firewalls and intrusion detection systems.
+Identifies reconnaissance attempts by monitoring:
+- Connection attempts to multiple ports
+- Rapid sequential connections
+- Firewall drop patterns
 
-Detection logic:
-- Counts port scan events per IP within time window
-- Triggers when threshold exceeded (default: 20 events in 7 days)
-- Medium confidence - automated scanning tools generate distinctive patterns
-- Uses timestamp helper to guarantee proper first_seen/last_seen
+Detection criteria:
+- Multiple port access attempts from same IP
+- Within configured time window
+- Exceeds threshold count
 
 Author: TribanFT Project
 License: GNU GPL v3
 """
 
+import ipaddress
+from collections import defaultdict
 from typing import List
+from datetime import datetime
+
 from .base import BaseDetector
-from ..models import SecurityEvent, DetectionResult, DetectionConfidence, EventType
-from ..config import config
+from ..models import DetectionResult, SecurityEvent, EventType
 
 
 class PortScanDetector(BaseDetector):
-    """Detects port scanning activity"""
+    """
+    Detects port scanning reconnaissance activity.
     
-    def __init__(self, whitelist_manager):
-        """
-        Initialize port scan detector.
-        
-        Args:
-            whitelist_manager: WhitelistManager for filtering trusted IPs
-        """
-        super().__init__("port_scan_detector", whitelist_manager)
-        self.enabled = config.enable_port_scan_detection
+    Analyzes connection patterns for scanning behavior.
+    """
+    
+    def __init__(self, config):
+        """Initialize port scan detector with configuration."""
+        super().__init__(config, EventType.PORT_SCAN)
+        self.threshold = config.port_scan_threshold
     
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """
-        Analyze events and identify port scanning attacks.
+        Analyze port access events and detect scanning patterns.
+        
+        Groups events by IP and counts occurrences within time window.
         
         Args:
-            events: List of SecurityEvent objects from log parsers
+            events: List of SecurityEvent objects (filtered for PORT_SCAN)
             
         Returns:
-            List of DetectionResult objects for detected threats
+            List of DetectionResult for IPs exceeding threshold
         """
-        if not self.enabled:
-            return []
+        # Group events by source IP
+        events_by_ip = defaultdict(list)
+        for event in events:
+            if event.event_type == EventType.PORT_SCAN:
+                events_by_ip[event.source_ip].append(event)
         
-        port_scan_events = [e for e in events if e.event_type == EventType.PORT_SCAN]
-        filtered_events = self.filter_whitelisted(port_scan_events)
-        recent_events = self.calculate_time_window_events(
-            filtered_events, config.time_window_minutes
-        )
+        detections = []
         
-        results = []
-        grouped_events = self.group_events_by_ip(recent_events)
-        
-        for ip_str, ip_events in grouped_events.items():
-            if len(ip_events) >= config.port_scan_threshold:
-                self.logger.warning(
-                    f"🚨 DETECTION: {ip_str} port scan with {len(ip_events)} attempts"
+        # Analyze each IP's activity
+        for ip_str, ip_events in events_by_ip.items():
+            event_count = len(ip_events)
+            
+            # Check if exceeds threshold
+            if event_count >= self.threshold:
+                # Identify unique ports if available
+                ports = set()
+                for event in ip_events:
+                    if hasattr(event, 'destination_port') and event.destination_port:
+                        ports.add(event.destination_port)
+                
+                if ports:
+                    port_info = f"{len(ports)} ports" if len(ports) > 1 else f"port {list(ports)[0]}"
+                else:
+                    port_info = "multiple ports"
+                
+                # Use helper to create result with guaranteed timestamps
+                result = self._create_detection_result(
+                    ip_str=ip_str,
+                    reason=f"Port scan detected - {event_count} attempts on {port_info}",
+                    confidence='high' if event_count >= self.threshold * 2 else 'medium',
+                    event_count=event_count,
+                    source_events=ip_events
                 )
                 
-                # Use helper method to create result with guaranteed timestamps
-                results.append(self._create_detection_result(
-                    ip_events=ip_events,
-                    reason=f"Port scan detected: {len(ip_events)} scan attempts",
-                    confidence=DetectionConfidence.MEDIUM
-                ))
+                if result:
+                    detections.append(result)
         
-        return results
+        return detections

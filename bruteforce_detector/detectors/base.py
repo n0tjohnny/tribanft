@@ -1,164 +1,140 @@
 """
 TribanFT Base Detector
 
-Abstract base class for all threat detection modules.
+Base class for all detectors providing common detection functionality.
 
-Provides common functionality for all detectors:
-- Whitelist filtering to exclude trusted IPs
-- Event grouping by source IP
-- Time window calculations for rate-based detection
-- Standardized detection interface with timestamp guarantees
+Provides:
+- Abstract interface for detectors
+- Timestamp extraction from SecurityEvent lists
+- DetectionResult creation with guaranteed timestamps
+- IP validation and confidence mapping
 
-All detector implementations must inherit from this class and implement
-the detect() method with their specific detection logic.
+All detectors inherit from BaseDetector and implement detect() method.
 
 Author: TribanFT Project
 License: GNU GPL v3
 """
 
-from abc import ABC, abstractmethod
-from typing import List, Set
-from datetime import datetime, timedelta
 import ipaddress
 import logging
+from typing import List, Optional
+from datetime import datetime
+from abc import ABC, abstractmethod
 
-from ..models import SecurityEvent, DetectionResult, DetectionConfidence
-from ..managers.whitelist import WhitelistManager
-from ..config import get_config
+from ..models import DetectionResult, SecurityEvent, EventType, ConfidenceLevel
 
 
 class BaseDetector(ABC):
     """
-    Abstract base class for all detectors.
+    Base class for all threat detectors.
     
-    Provides shared functionality for filtering, grouping, and analyzing
-    security events. All concrete detectors inherit from this class.
+    Provides common functionality for creating DetectionResult objects
+    with proper timestamp extraction from SecurityEvent lists.
     """
     
-    def __init__(self, name: str, whitelist_manager: WhitelistManager):
+    def __init__(self, config, event_type: EventType):
         """
-        Initialize detector with name and whitelist manager.
+        Initialize base detector.
         
         Args:
-            name: Detector name for logging (e.g., "prelogin_detector")
-            whitelist_manager: WhitelistManager instance for filtering trusted IPs
+            config: Configuration object
+            event_type: EventType enum for this detector
         """
-        self.name = name
-        self.whitelist_manager = whitelist_manager
-        self.config = get_config()
-        self.enabled = True
+        self.config = config
+        self.event_type = event_type
         self.logger = logging.getLogger(__name__)
     
     @abstractmethod
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """
-        Analyze events and return detection results.
+        Analyze events and return detections.
         
-        Must be implemented by subclasses with their specific detection logic.
+        Must be implemented by subclasses to provide detection logic.
         
         Args:
             events: List of SecurityEvent objects to analyze
             
         Returns:
-            List of DetectionResult objects for detected threats
+            List of DetectionResult objects for malicious IPs
         """
         pass
     
-    def filter_whitelisted(self, events: List[SecurityEvent]) -> List[SecurityEvent]:
-        """
-        Remove events from whitelisted IPs.
-        
-        Args:
-            events: List of SecurityEvent objects
-            
-        Returns:
-            Filtered list excluding whitelisted IPs
-        """
-        return [
-            event for event in events 
-            if not self.whitelist_manager.is_whitelisted(event.source_ip)
-        ]
-    
-    def group_events_by_ip(self, events: List[SecurityEvent]) -> dict:
-        """
-        Group events by source IP address.
-        
-        Args:
-            events: List of SecurityEvent objects
-            
-        Returns:
-            Dictionary mapping IP strings to lists of events from that IP
-        """
-        grouped = {}
-        for event in events:
-            ip_str = str(event.source_ip)
-            if ip_str not in grouped:
-                grouped[ip_str] = []
-            grouped[ip_str].append(event)
-        return grouped
-    
-    def calculate_time_window_events(self, events: List[SecurityEvent], 
-                                   time_window_minutes: int,
-                                   reference_time: datetime = None) -> List[SecurityEvent]:
-        """
-        Filter events to only those within the time window.
-        
-        Args:
-            events: List of SecurityEvent objects
-            time_window_minutes: Time window in minutes (e.g., 10080 = 7 days)
-            reference_time: Reference time (default: now) for calculating window
-            
-        Returns:
-            Filtered list of events within the time window
-        """
-        # Allow configurable reference time for testing/historical analysis
-        if reference_time is None:
-            reference_time = datetime.now()
-            
-        cutoff_time = reference_time - timedelta(minutes=time_window_minutes)
-        return [event for event in events if event.timestamp >= cutoff_time]
-    
-    def _create_detection_result(self, ip_events: List[SecurityEvent], 
-                                 reason: str, confidence: DetectionConfidence) -> DetectionResult:
+    def _create_detection_result(
+        self,
+        ip_str: str,
+        reason: str,
+        confidence: str,
+        event_count: int,
+        source_events: List[SecurityEvent],
+        first_seen: Optional[datetime] = None,
+        last_seen: Optional[datetime] = None
+    ) -> Optional[DetectionResult]:
         """
         Create DetectionResult with guaranteed timestamps.
         
-        Ensures first_seen and last_seen are always populated from events.
-        Falls back to current time only if no events have timestamps.
+        This helper ensures all DetectionResults have valid timestamps by:
+        1. Using provided first_seen/last_seen if available
+        2. Extracting from source_events if not provided
+        3. Falling back to datetime.now() as last resort
         
         Args:
-            ip_events: List of SecurityEvent objects for this IP
-            reason: Human-readable reason for detection
-            confidence: Detection confidence level
+            ip_str: IP address string
+            reason: Human-readable detection reason
+            confidence: 'high', 'medium', or 'low'
+            event_count: Number of events detected
+            source_events: List of SecurityEvent objects that triggered detection
+            first_seen: Optional override for first detection time
+            last_seen: Optional override for last detection time
             
         Returns:
-            DetectionResult with guaranteed timestamp fields
-            
-        Raises:
-            ValueError: If ip_events is empty
+            DetectionResult object or None if IP is invalid
         """
-        if not ip_events:
-            raise ValueError("Cannot create DetectionResult without events")
-        
-        # Extract all valid timestamps from events
-        timestamps = [e.timestamp for e in ip_events if e.timestamp]
-        
-        # Use event timestamps if available, otherwise current time
-        now = datetime.now()
-        first_seen = min(timestamps) if timestamps else now
-        last_seen = max(timestamps) if timestamps else now
-        
-        self.logger.debug(
-            f"Creating detection for {ip_events[0].source_ip}: "
-            f"{len(ip_events)} events, first={first_seen}, last={last_seen}"
-        )
-        
-        return DetectionResult(
-            ip=ip_events[0].source_ip,
-            reason=reason,
-            confidence=confidence,
-            event_count=len(ip_events),
-            source_events=ip_events,
-            first_seen=first_seen,
-            last_seen=last_seen
-        )
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            
+            # Determine timestamps with fallback chain
+            final_first_seen = first_seen
+            final_last_seen = last_seen
+            
+            # Extract from source_events if not explicitly provided
+            if (not final_first_seen or not final_last_seen) and source_events:
+                timestamps = [
+                    e.timestamp for e in source_events 
+                    if e.timestamp is not None
+                ]
+                
+                if timestamps:
+                    if not final_first_seen:
+                        final_first_seen = min(timestamps)
+                    if not final_last_seen:
+                        final_last_seen = max(timestamps)
+            
+            # Final fallback to current time
+            now = datetime.now()
+            if not final_first_seen:
+                final_first_seen = now
+            if not final_last_seen:
+                final_last_seen = now
+            
+            # Map confidence string to enum
+            confidence_map = {
+                'high': ConfidenceLevel.HIGH,
+                'medium': ConfidenceLevel.MEDIUM,
+                'low': ConfidenceLevel.LOW
+            }
+            confidence_level = confidence_map.get(confidence.lower(), ConfidenceLevel.MEDIUM)
+            
+            return DetectionResult(
+                ip=ip,
+                reason=reason,
+                confidence=confidence_level,
+                event_count=event_count,
+                source_events=source_events,
+                geolocation=None,  # Enriched later by BlacklistManager
+                first_seen=final_first_seen,
+                last_seen=final_last_seen
+            )
+            
+        except ValueError as e:
+            self.logger.warning(f"Invalid IP address {ip_str}: {e}")
+            return None

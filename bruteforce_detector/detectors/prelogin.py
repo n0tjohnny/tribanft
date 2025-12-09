@@ -1,110 +1,77 @@
 """
-TribanFT Prelogin Brute Force Detector
+TribanFT Prelogin Bruteforce Detector
 
-Detects MSSQL reconnaissance attacks via invalid prelogin packets.
+Detects MSSQL prelogin bruteforce attacks.
 
-Attack pattern:
-Attackers send malformed prelogin packets to MSSQL servers to probe for
-vulnerabilities or gather information. These appear in logs as "prelogin packet
-used to open a connection" errors.
+Identifies rapid prelogin connection attempts indicating automated
+scanning or brute force tools targeting MSSQL servers.
 
-Detection logic:
-- Counts prelogin events per IP within time window
-- Triggers when threshold exceeded (default: 20 events in 7 days)
-- High confidence - strong indicator of automated attack
-- Uses timestamp helper to guarantee proper first_seen/last_seen
+Detection criteria:
+- Multiple prelogin events from same IP
+- Within configured time window
+- Exceeds threshold count
 
 Author: TribanFT Project
 License: GNU GPL v3
 """
 
+import ipaddress
+from collections import defaultdict
 from typing import List
 from datetime import datetime
-from collections import defaultdict
-import logging
 
 from .base import BaseDetector
-from ..models import SecurityEvent, DetectionResult, DetectionConfidence, EventType
-from ..config import get_config
+from ..models import DetectionResult, SecurityEvent, EventType
 
 
 class PreloginDetector(BaseDetector):
     """
-    Detects MSSQL prelogin brute force attacks.
+    Detects MSSQL prelogin bruteforce attempts.
     
-    This detector identifies reconnaissance attempts where attackers send
-    invalid prelogin packets to probe MSSQL servers.
+    Analyzes prelogin events for patterns indicating automated attacks.
     """
     
-    def __init__(self, whitelist_manager):
-        """
-        Initialize prelogin detector.
-        
-        Args:
-            whitelist_manager: WhitelistManager instance for filtering trusted IPs
-        """
-        super().__init__("prelogin_detector", whitelist_manager)
-        self.enabled = get_config().enable_prelogin_detection
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, config):
+        """Initialize prelogin detector with configuration."""
+        super().__init__(config, EventType.PRELOGIN_BRUTEFORCE)
+        self.threshold = config.prelogin_bruteforce_threshold
     
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """
-        Analyze events and identify prelogin brute force attacks.
+        Analyze prelogin events and detect bruteforce patterns.
         
-        Process:
-        1. Filter for prelogin-type events
-        2. Remove whitelisted IPs
-        3. Apply time window filtering
-        4. Group by IP and count events
-        5. Create DetectionResult for IPs exceeding threshold
+        Groups events by IP and counts occurrences within time window.
         
         Args:
-            events: List of SecurityEvent objects from log parsers
+            events: List of SecurityEvent objects (filtered for PRELOGIN_BRUTEFORCE)
             
         Returns:
-            List of DetectionResult objects for detected threats
+            List of DetectionResult for IPs exceeding threshold
         """
-        if not self.enabled:
-            return []
+        # Group events by source IP
+        events_by_ip = defaultdict(list)
+        for event in events:
+            if event.event_type == EventType.PRELOGIN_BRUTEFORCE:
+                events_by_ip[event.source_ip].append(event)
         
-        # Filter for prelogin events only
-        prelogin_events = [e for e in events if e.event_type == EventType.PRELOGIN_INVALID]
-        self.logger.info(f"Total prelogin events: {len(prelogin_events)}")
+        detections = []
         
-        # Remove whitelisted IPs
-        filtered_events = self.filter_whitelisted(prelogin_events)
-        self.logger.info(f"After whitelist filtering: {len(filtered_events)} events")
-        
-        # Apply time window
-        recent_events = self.calculate_time_window_events(
-            filtered_events, get_config().time_window_minutes
-        )
-        self.logger.info(
-            f"After time window filtering ({get_config().time_window_minutes}min): "
-            f"{len(recent_events)} events"
-        )
-        
-        # Group by IP and check thresholds
-        results = []
-        grouped_events = self.group_events_by_ip(recent_events)
-        self.logger.info(f"Grouped into {len(grouped_events)} unique IPs")
-        
-        for ip_str, ip_events in grouped_events.items():
+        # Analyze each IP's activity
+        for ip_str, ip_events in events_by_ip.items():
             event_count = len(ip_events)
-            threshold = get_config().prelogin_pattern_threshold
-            self.logger.info(f"IP {ip_str}: {event_count} events (threshold: {threshold})")
             
-            if event_count >= threshold:
-                self.logger.warning(
-                    f"🚨 DETECTION: {ip_str} exceeded threshold with "
-                    f"{event_count} prelogin invalid packets"
+            # Check if exceeds threshold
+            if event_count >= self.threshold:
+                # Use helper to create result with guaranteed timestamps
+                result = self._create_detection_result(
+                    ip_str=ip_str,
+                    reason=f"MSSQL prelogin bruteforce detected - {event_count} attempts",
+                    confidence='high' if event_count >= self.threshold * 2 else 'medium',
+                    event_count=event_count,
+                    source_events=ip_events
                 )
                 
-                # Use helper method to create result with guaranteed timestamps
-                results.append(self._create_detection_result(
-                    ip_events=ip_events,
-                    reason=f"Prelogin brute force detected: {event_count} invalid packets",
-                    confidence=DetectionConfidence.HIGH
-                ))
+                if result:
+                    detections.append(result)
         
-        return results
+        return detections

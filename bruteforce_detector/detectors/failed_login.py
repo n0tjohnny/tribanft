@@ -1,104 +1,91 @@
 """
 TribanFT Failed Login Detector
 
-Detects brute force attacks through failed login attempts.
+Detects failed login bruteforce attempts.
 
-Attack pattern:
-Attackers attempt multiple authentication failures to gain unauthorized access
-through credential guessing or dictionary attacks.
+Monitors authentication failures from various services:
+- MSSQL login failures
+- SSH authentication failures
+- System authentication failures
 
-Detection logic:
-- Counts failed login events per IP within time window
-- Triggers when threshold exceeded (default: 20 events in 7 days)
-- High confidence - strong indicator of brute force attack
-- Uses timestamp helper to guarantee proper first_seen/last_seen
+Detection criteria:
+- Multiple failed attempts from same IP
+- Within configured time window
+- Exceeds threshold count
 
 Author: TribanFT Project
 License: GNU GPL v3
 """
 
+import ipaddress
+from collections import defaultdict
 from typing import List
 from datetime import datetime
-import ipaddress
-import logging
 
 from .base import BaseDetector
-from ..models import SecurityEvent, DetectionResult, DetectionConfidence, EventType
-from ..config import get_config
+from ..models import DetectionResult, SecurityEvent, EventType
 
 
 class FailedLoginDetector(BaseDetector):
-    """Detects failed login attempts from MSSQL logs"""
+    """
+    Detects failed login bruteforce patterns.
     
-    def __init__(self, whitelist_manager):
-        """
-        Initialize failed login detector.
-        
-        Args:
-            whitelist_manager: WhitelistManager for filtering trusted IPs
-        """
-        super().__init__("failed_login_detector", whitelist_manager)
-        self.config = get_config()
-        self.enabled = self.config.enable_failed_login_detection
-        self.logger = logging.getLogger(__name__)
+    Analyzes authentication failure events to identify brute force attacks.
+    """
+    
+    def __init__(self, config):
+        """Initialize failed login detector with configuration."""
+        super().__init__(config, EventType.FAILED_LOGIN)
+        self.threshold = config.failed_login_threshold
     
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """
-        Analyze events and identify failed login brute force attacks.
+        Analyze failed login events and detect bruteforce patterns.
         
-        Process:
-        1. Filter for failed login events
-        2. Remove whitelisted IPs
-        3. Apply time window filtering
-        4. Group by IP and count events
-        5. Create DetectionResult for IPs exceeding threshold
+        Groups events by IP and counts occurrences within time window.
         
         Args:
-            events: List of SecurityEvent objects from log parsers
+            events: List of SecurityEvent objects (filtered for FAILED_LOGIN)
             
         Returns:
-            List of DetectionResult objects for detected threats
+            List of DetectionResult for IPs exceeding threshold
         """
-        if not self.enabled:
-            return []
+        # Group events by source IP
+        events_by_ip = defaultdict(list)
+        for event in events:
+            if event.event_type == EventType.FAILED_LOGIN:
+                events_by_ip[event.source_ip].append(event)
         
-        # Filter for failed login events only
-        failed_login_events = [e for e in events if e.event_type == EventType.FAILED_LOGIN]
-        self.logger.info(f"Total failed login events: {len(failed_login_events)}")
+        detections = []
         
-        filtered_events = self.filter_whitelisted(failed_login_events)
-        self.logger.info(f"After whitelist filtering: {len(filtered_events)} events")
-        
-        # Apply time window
-        recent_events = self.calculate_time_window_events(
-            filtered_events, self.config.time_window_minutes
-        )
-        self.logger.info(
-            f"After time window filtering ({self.config.time_window_minutes}min): "
-            f"{len(recent_events)} events"
-        )
-        
-        # Group by IP and check thresholds
-        results = []
-        grouped_events = self.group_events_by_ip(recent_events)
-        self.logger.info(f"Grouped into {len(grouped_events)} unique IPs")
-        
-        for ip_str, ip_events in grouped_events.items():
+        # Analyze each IP's activity
+        for ip_str, ip_events in events_by_ip.items():
             event_count = len(ip_events)
-            threshold = self.config.failed_login_threshold
-            self.logger.info(f"IP {ip_str}: {event_count} events (threshold: {threshold})")
             
-            if event_count >= threshold:
-                self.logger.warning(
-                    f"🚨 DETECTION: {ip_str} exceeded threshold with "
-                    f"{event_count} failed logins"
+            # Check if exceeds threshold
+            if event_count >= self.threshold:
+                # Determine service being attacked
+                services = set()
+                for event in ip_events:
+                    if 'mssql' in event.raw_log.lower() or 'sql' in event.raw_log.lower():
+                        services.add('MSSQL')
+                    elif 'ssh' in event.raw_log.lower():
+                        services.add('SSH')
+                    else:
+                        services.add('System')
+                
+                service_str = '/'.join(services) if services else 'Unknown'
+                
+                # Use helper to create result with guaranteed timestamps
+                result = self._create_detection_result(
+                    ip_str=ip_str,
+                    reason=f"Failed login bruteforce detected on {service_str} - {event_count} attempts",
+                    confidence='high' if event_count >= self.threshold * 2 else 'medium',
+                    event_count=event_count,
+                    source_events=ip_events
                 )
                 
-                # Use helper method to create result with guaranteed timestamps
-                results.append(self._create_detection_result(
-                    ip_events=ip_events,
-                    reason=f"Failed login brute force detected: {event_count} failed logins",
-                    confidence=DetectionConfidence.HIGH
-                ))
+                if result:
+                    detections.append(result)
         
-        return results
+        return detections
