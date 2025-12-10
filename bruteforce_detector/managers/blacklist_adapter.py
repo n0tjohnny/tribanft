@@ -22,7 +22,7 @@ License: GNU GPL v3
 
 import logging
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 from datetime import datetime
 import ipaddress
 
@@ -246,19 +246,24 @@ class BlacklistAdapter:
             self.logger.info(f"  {source}: {count}")
         self.logger.info(f"{'='*70}\n")
     
-    def export_to_file(self, output_file: str, ip_version: int = 4):
+    def export_to_file(self, output_file: str, ip_version: int = 4, create_backup: bool = False):
         """
         Export database to text file for backup or compatibility.
         
         Args:
             output_file: Destination file path
             ip_version: 4 for IPv4, 6 for IPv6
+            create_backup: Create timestamped backup before overwriting
         """
         if not self.use_database:
             self.logger.warning("⚠️  Not using database, nothing to export")
             return
         
         self.logger.info(f"📤 Exporting IPv{ip_version} to {output_file}")
+        
+        # Create backup if requested
+        if create_backup:
+            self.create_backup(Path(output_file))
         
         ips_info = self.db.get_all_ips(ip_version=ip_version)
         
@@ -267,6 +272,84 @@ class BlacklistAdapter:
         writer.write_blacklist(output_file, ips_info, len(ips_info))
         
         self.logger.info(f"   ✅ Exported {len(ips_info)} IPs")
+    
+    def create_backup(self, file_path: Path) -> Optional[Path]:
+        """
+        Create timestamped backup of file.
+        
+        Args:
+            file_path: Path to file to backup
+            
+        Returns:
+            Path to backup file, or None if source doesn't exist
+        """
+        if not file_path.exists():
+            return None
+        
+        backup_dir = Path("/root/backup/lists")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_path = backup_dir / f"{file_path.name}.backup.{timestamp}"
+        
+        import shutil
+        shutil.copy2(file_path, backup_path)
+        self.logger.info(f"💾 Backup: {backup_path.name}")
+        
+        # Keep only last 20 backups
+        backups = sorted(backup_dir.glob(f"{file_path.name}.backup.*"))
+        for old_backup in backups[:-20]:
+            old_backup.unlink()
+            self.logger.debug(f"🗑️  Removed old backup: {old_backup.name}")
+        
+        return backup_path
+    
+    def print_stats(self):
+        """Print database statistics in user-friendly format."""
+        stats = self.get_statistics()
+        
+        if not self.use_database:
+            self.logger.info("\n" + "="*70)
+            self.logger.info("📊 FILE STATISTICS")
+            self.logger.info("="*70)
+            self.logger.info(f"Total IPs: {stats.get('total_ips', 0)}")
+            self.logger.info(f"IPv4: {stats.get('ipv4', 0)}")
+            self.logger.info(f"IPv6: {stats.get('ipv6', 0)}")
+            self.logger.info("="*70)
+            return
+        
+        all_ips = self.db.get_all_ips()
+        with_first = sum(1 for info in all_ips.values() if info.get('first_seen'))
+        with_last = sum(1 for info in all_ips.values() if info.get('last_seen'))
+        with_added = sum(1 for info in all_ips.values() if info.get('date_added'))
+        
+        self.logger.info("\n" + "="*70)
+        self.logger.info("📊 DATABASE STATISTICS")
+        self.logger.info("="*70)
+        self.logger.info(f"Total IPs: {stats['total_ips']}")
+        self.logger.info(f"IPv4: {stats['ipv4']}")
+        
+        if stats.get('ipv6', 0) > 0:
+            self.logger.info(f"IPv6: {stats['ipv6']}")
+        
+        self.logger.info(f"With Geolocation: {stats.get('with_geolocation', 0)}")
+        self.logger.info(f"Total Events: {stats['total_events']}")
+        
+        if stats['total_ips'] > 0:
+            self.logger.info(f"\nTimestamp Coverage:")
+            self.logger.info(f"  With first_seen: {with_first} ({with_first/stats['total_ips']*100:.1f}%)")
+            self.logger.info(f"  With last_seen: {with_last} ({with_last/stats['total_ips']*100:.1f}%)")
+            self.logger.info(f"  With date_added: {with_added} ({with_added/stats['total_ips']*100:.1f}%)")
+        
+        # Show by source if available
+        by_source = stats.get('by_source', {})
+        if by_source:
+            self.logger.info(f"\nBy Source:")
+            for source, count in by_source.items():
+                self.logger.info(f"  {source}: {count}")
+        
+        self.logger.info("="*70)
     
     def get_statistics(self) -> Dict:
         """

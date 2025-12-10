@@ -236,6 +236,9 @@ def main():
     parser.add_argument('--show-manual', action='store_true', help='Show manual blacklist only')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
     parser.add_argument('--sync-files', action='store_true', help='Force sync database to blacklist files')
+    parser.add_argument('--sync-output', type=str, help='Custom output file for sync (default: config file)')
+    parser.add_argument('--sync-stats', action='store_true', help='Show database statistics with sync')
+    parser.add_argument('--stats-only', action='store_true', help='Show database statistics without syncing')
     
     args = parser.parse_args()
     
@@ -294,34 +297,79 @@ def main():
         else:
             print("No manual blacklist file found")
         sys.exit(0)
+    elif args.stats_only:
+        # Show database statistics without syncing
+        if engine.config.use_database:
+            from bruteforce_detector.managers.blacklist_adapter import BlacklistAdapter
+            adapter = BlacklistAdapter(engine.config, use_database=True)
+            adapter.print_stats()
+        else:
+            engine.logger.warning("⚠️  Not using database, statistics unavailable")
+        sys.exit(0)
     elif args.sync_files:
         engine.logger.info("🔄 Manual database → file sync requested")
         
         try:
-            # Use the adapter's export_to_file method which is designed for this
-            if engine.config.use_database:
-                # Export IPv4
-                engine.blacklist_manager.writer.export_to_file(
-                    engine.config.blacklist_ipv4_file, 
-                    ip_version=4
+            if not engine.config.use_database:
+                engine.logger.warning("⚠️  Not using database, sync not needed")
+                sys.exit(0)
+            
+            from bruteforce_detector.managers.database import BlacklistDatabase
+            from bruteforce_detector.managers.blacklist_adapter import BlacklistAdapter
+            
+            db = BlacklistDatabase()
+            adapter = BlacklistAdapter(engine.config, use_database=True)
+            
+            # Show stats before sync if requested
+            if args.sync_stats:
+                engine.logger.info("\n📊 BEFORE SYNC:")
+                adapter.print_stats()
+                engine.logger.info("")
+            
+            # Determine output file(s)
+            if args.sync_output:
+                # Custom output file - single file sync
+                output_file = args.sync_output
+                engine.logger.info(f"📝 Syncing to custom file: {output_file}")
+                
+                # Determine IP version from filename or default to IPv4
+                ip_version = 4
+                if 'ipv6' in output_file.lower():
+                    ip_version = 6
+                
+                # Export with backup
+                adapter.export_to_file(output_file, ip_version=ip_version, create_backup=True)
+            else:
+                # Default behavior - sync to configured files
+                engine.logger.info("📝 Syncing to configured files...")
+                
+                # Export IPv4 with backup
+                adapter.export_to_file(
+                    engine.config.blacklist_ipv4_file,
+                    ip_version=4,
+                    create_backup=True
                 )
                 
                 # Export IPv6 if any exist
-                from bruteforce_detector.managers.database import BlacklistDatabase
-                db = BlacklistDatabase()
                 stats = db.get_statistics()
                 if stats.get('ipv6', 0) > 0:
-                    engine.blacklist_manager.writer.export_to_file(
+                    adapter.export_to_file(
                         engine.config.blacklist_ipv6_file,
-                        ip_version=6
+                        ip_version=6,
+                        create_backup=True
                     )
-                
-                engine.logger.info("✅ Database → file sync completed successfully")
-            else:
-                engine.logger.warning("⚠️  Not using database, sync not needed")
-                
+            
+            # Show stats after sync if requested
+            if args.sync_stats:
+                engine.logger.info("\n📊 AFTER SYNC:")
+                adapter.print_stats()
+            
+            engine.logger.info("\n✅ Database → file sync completed successfully")
+            
         except Exception as e:
             engine.logger.error(f"❌ Sync failed: {e}")
+            import traceback
+            engine.logger.debug(traceback.format_exc())
             sys.exit(1)
     else:
         # Default action: run detection
