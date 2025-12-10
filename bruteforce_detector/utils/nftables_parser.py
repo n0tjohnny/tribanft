@@ -61,10 +61,14 @@ def parse_expiry_to_timedelta(expiry_str: str) -> Optional[timedelta]:
             if match:
                 minutes = int(match.group(1))
         
-        # Parse seconds (exclude when part of 'ms')
+        # Parse seconds (exclude milliseconds)
         if 's' in expiry_str:
-            # Match 's' not followed by another character (or followed by 'ms')
-            match = re.search(r'(\d+)s(?![\w]|(?=\d+ms))', expiry_str)
+            # Match digits followed by 's' but not followed by more digits (to exclude 'ms')
+            # This regex looks for number + 's' where 's' is not preceded by 'm'
+            match = re.search(r'(\d+)s(?![\dms])', expiry_str)
+            if not match:
+                # Try alternative pattern: digits followed by 's' with optional 'ms' after
+                match = re.search(r'(\d+)s(?=\d+ms|$|\s)', expiry_str)
             if match:
                 seconds = int(match.group(1))
         
@@ -146,15 +150,38 @@ def parse_nftables_set_elements(output: str, set_name: str = 'port_scanners') ->
     """
     result = {}
     
-    # Find the set definition
-    set_pattern = rf'set\s+{set_name}\s*\{{(.*?)\}}'
-    set_match = re.search(set_pattern, output, re.DOTALL)
-    
-    if not set_match:
+    # Find the set definition - use a more robust approach
+    # Look for "set port_scanners {" and find matching closing brace
+    set_start = output.find(f'set {set_name}')
+    if set_start == -1:
         logger.debug(f"Set '{set_name}' not found in output")
         return result
     
-    set_content = set_match.group(1)
+    # Find the opening brace
+    brace_start = output.find('{', set_start)
+    if brace_start == -1:
+        logger.debug(f"Opening brace not found for set '{set_name}'")
+        return result
+    
+    # Find matching closing brace (handle nested braces)
+    brace_count = 1
+    pos = brace_start + 1
+    brace_end = -1
+    while pos < len(output) and brace_count > 0:
+        if output[pos] == '{':
+            brace_count += 1
+        elif output[pos] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                brace_end = pos
+                break
+        pos += 1
+    
+    if brace_end == -1:
+        logger.debug(f"Closing brace not found for set '{set_name}'")
+        return result
+    
+    set_content = output[brace_start+1:brace_end]
     
     # Extract default timeout from set definition
     default_timeout = None
@@ -163,7 +190,7 @@ def parse_nftables_set_elements(output: str, set_name: str = 'port_scanners') ->
         default_timeout = timeout_match.group(1)
     
     # Parse elements section
-    elements_pattern = r'elements\s*=\s*\{(.*?)\}'
+    elements_pattern = r'elements\s*=\s*\{([^}]+)\}'
     elements_match = re.search(elements_pattern, set_content, re.DOTALL)
     
     if not elements_match:
@@ -180,6 +207,12 @@ def parse_nftables_set_elements(output: str, set_name: str = 'port_scanners') ->
         ip = match.group(1)
         timeout = match.group(2) or default_timeout
         expires = match.group(3)
+        
+        # Clean up timeout and expires (remove trailing commas/spaces)
+        if timeout:
+            timeout = timeout.rstrip(',').strip()
+        if expires:
+            expires = expires.rstrip(',').strip()
         
         if not timeout or not expires:
             # If we don't have both timeout and expires, skip timestamp calculation
