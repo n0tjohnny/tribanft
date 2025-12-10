@@ -5,7 +5,7 @@ SQLite backend for blacklist storage at scale (10k+ IPs).
 
 Provides:
 - Efficient IP storage with metadata
-- Atomic bulk operations
+- Atomic bulk operations with UPSERT logic (preserves existing data)
 - Historical tracking with timestamps
 - Event type storage
 - Geolocation caching
@@ -73,7 +73,10 @@ class BlacklistDatabase:
     
     def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
         """
-        Bulk add IPs for performance with event_types support.
+        Bulk add/update IPs com UPSERT correto.
+        
+        Se IP existe: UPDATE apenas campos fornecidos (preserva existentes)
+        Se IP novo: INSERT completo
         
         Converts datetime objects to ISO strings for SQLite storage.
         Stores event_types in metadata JSON field.
@@ -82,7 +85,7 @@ class BlacklistDatabase:
             ips_info: Dict mapping IP string to metadata dict
             
         Returns:
-            Number of IPs successfully added
+            Number of IPs successfully added/updated
         """
         added = 0
         
@@ -90,43 +93,19 @@ class BlacklistDatabase:
             for ip_str, info in ips_info.items():
                 try:
                     ip = ipaddress.ip_address(ip_str)
-                    geo = info.get('geolocation', {})
                     
-                    # Convert datetime objects to ISO strings for SQLite
-                    first_seen = info.get('first_seen')
-                    last_seen = info.get('last_seen')
-                    date_added = info.get('date_added')
+                    # Verificar se IP já existe
+                    existing = conn.execute(
+                        "SELECT * FROM blacklist WHERE ip = ?", 
+                        (ip_str,)
+                    ).fetchone()
                     
-                    first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else None
-                    last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else None
-                    added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
-                    
-                    # Prepare metadata with event_types
-                    metadata = info.get('metadata', {}).copy() if info.get('metadata') else {}
-                    
-                    # Add event_types to metadata if not already present
-                    if 'event_types' not in metadata and info.get('event_types'):
-                        metadata['event_types'] = info['event_types']
-                    
-                    # Insert or replace IP entry
-                    conn.execute("""
-                        INSERT OR REPLACE INTO blacklist VALUES 
-                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        ip_str,
-                        ip.version,
-                        info.get('reason'),
-                        info.get('confidence'),
-                        info.get('event_count', 0),
-                        info.get('source'),
-                        geo.get('country') if geo else None,
-                        geo.get('city') if geo else None,
-                        geo.get('isp') if geo else None,
-                        first_str,
-                        last_str,
-                        added_str,
-                        json.dumps(metadata)
-                    ))
+                    if existing:
+                        # UPDATE: atualizar apenas campos fornecidos
+                        self._update_existing_ip(conn, ip_str, info, existing)
+                    else:
+                        # INSERT: novo IP completo
+                        self._insert_new_ip(conn, ip_str, ip, info)
                     
                     added += 1
                     
@@ -137,6 +116,138 @@ class BlacklistDatabase:
             conn.commit()
         
         return added
+    
+    def _update_existing_ip(self, conn, ip_str: str, new_info: Dict, existing_row):
+        """
+        Update apenas campos fornecidos, preserva existentes.
+        
+        Args:
+            conn: SQLite connection
+            ip_str: IP address string
+            new_info: New data to merge
+            existing_row: Existing database row
+        """
+        # Parse existing data
+        (_, ip_version, reason, confidence, event_count, source,
+         country, city, isp, first_seen, last_seen, date_added, metadata_json) = existing_row
+        
+        # Merge geolocation (prioridade: new_info se fornecido)
+        geo = new_info.get('geolocation')
+        if geo:
+            country = geo.get('country') or country
+            city = geo.get('city') or city
+            isp = geo.get('isp') or isp
+        
+        # Merge outros campos (prioridade: new_info se fornecido e não-None)
+        if new_info.get('reason'):
+            reason = new_info.get('reason')
+        if new_info.get('confidence'):
+            confidence = new_info.get('confidence')
+        if new_info.get('event_count') is not None:
+            event_count = new_info.get('event_count')
+        if new_info.get('source'):
+            source = new_info.get('source')
+        
+        # Timestamps: manter first_seen original, atualizar last_seen se fornecido
+        first_seen_new = new_info.get('first_seen')
+        last_seen_new = new_info.get('last_seen')
+        
+        # Manter first_seen original (não sobrescrever)
+        first_str = first_seen
+        
+        # Atualizar last_seen apenas se fornecido
+        if last_seen_new:
+            last_str = last_seen_new.isoformat() if hasattr(last_seen_new, 'isoformat') else last_seen_new
+        else:
+            last_str = last_seen
+        
+        # Metadata: merge JSON
+        try:
+            existing_metadata = json.loads(metadata_json) if metadata_json else {}
+        except:
+            existing_metadata = {}
+        
+        new_metadata = new_info.get('metadata', {})
+        
+        # Adicionar event_types se fornecido e não existe
+        if 'event_types' not in existing_metadata and new_info.get('event_types'):
+            new_metadata['event_types'] = new_info['event_types']
+        
+        merged_metadata = {**existing_metadata, **new_metadata}
+        
+        # UPDATE query
+        conn.execute("""
+            UPDATE blacklist SET
+                reason = ?,
+                confidence = ?,
+                event_count = ?,
+                source = ?,
+                country = ?,
+                city = ?,
+                isp = ?,
+                last_seen = ?,
+                metadata = ?
+            WHERE ip = ?
+        """, (
+            reason,
+            confidence,
+            event_count,
+            source,
+            country,
+            city,
+            isp,
+            last_str,
+            json.dumps(merged_metadata),
+            ip_str
+        ))
+    
+    def _insert_new_ip(self, conn, ip_str: str, ip, info: Dict):
+        """
+        Insert novo IP completo.
+        
+        Args:
+            conn: SQLite connection
+            ip_str: IP address string
+            ip: IP address object
+            info: Complete IP metadata
+        """
+        geo = info.get('geolocation', {})
+        
+        # Convert datetime objects to ISO strings for SQLite
+        first_seen = info.get('first_seen')
+        last_seen = info.get('last_seen')
+        date_added = info.get('date_added')
+        
+        first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else None
+        last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else None
+        added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
+        
+        # Prepare metadata with event_types
+        metadata = info.get('metadata', {}).copy() if info.get('metadata') else {}
+        
+        # Add event_types to metadata if not already present
+        if 'event_types' not in metadata and info.get('event_types'):
+            metadata['event_types'] = info['event_types']
+        
+        # Insert or replace IP entry
+        conn.execute("""
+            INSERT INTO blacklist VALUES 
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            ip_str,
+            ip.version,
+            info.get('reason'),
+            info.get('confidence'),
+            info.get('event_count', 0),
+            info.get('source'),
+            geo.get('country') if geo else None,
+            geo.get('city') if geo else None,
+            geo.get('isp') if geo else None,
+            first_str,
+            last_str,
+            added_str,
+            json.dumps(metadata)
+        ))
     
     def get_all_ips(self, ip_version: Optional[int] = None) -> Dict[str, Dict]:
         """

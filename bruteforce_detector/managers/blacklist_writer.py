@@ -7,6 +7,7 @@ This module handles file-based blacklist storage with:
 - Rich metadata extraction from comment blocks (geolocation, events, timestamps)
 - Anti-corruption protection (prevents accidental data loss)
 - Automatic backups before modifications
+- FILE LOCKING to prevent race conditions
 - Formatted output with statistics and organization
 
 File format includes detailed comments for each IP with geolocation, reason,
@@ -22,6 +23,8 @@ from datetime import datetime
 import logging
 import ipaddress
 import re
+import fcntl
+from contextlib import contextmanager
 
 
 class BlacklistWriter:
@@ -36,6 +39,44 @@ class BlacklistWriter:
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
+    
+    @contextmanager
+    def _file_lock(self, filepath: Path):
+        """
+        Context manager para file locking durante escritas.
+        
+        Previne race conditions quando múltiplos processos escrevem
+        simultaneamente (tribanft, ipinfo-batch, recover).
+        
+        Args:
+            filepath: Path do arquivo a ser travado
+            
+        Yields:
+            None (arquivo está travado durante o contexto)
+        """
+        lock_file = Path(str(filepath) + '.lock')
+        
+        try:
+            # Criar arquivo de lock
+            lock_fd = open(lock_file, 'w')
+            
+            # Adquirir lock exclusivo (bloqueia até conseguir)
+            self.logger.debug(f"Acquiring lock for {filepath.name}...")
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            self.logger.debug(f"Lock acquired for {filepath.name}")
+            
+            yield
+            
+        finally:
+            # Liberar lock
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            lock_fd.close()
+            
+            # Remover arquivo de lock
+            if lock_file.exists():
+                lock_file.unlink()
+            
+            self.logger.debug(f"Lock released for {filepath.name}")
     
     def read_blacklist(self, filename: str) -> Dict[str, Dict]:
         """
@@ -192,9 +233,12 @@ class BlacklistWriter:
         """
         Write blacklist with comprehensive metadata and corruption protection.
         
+        NOW WITH FILE LOCKING to prevent race conditions.
+        
         Safety features:
         - Validates write would not lose >50% of IPs
         - Automatic backup before modifications
+        - File locking to serialize concurrent writes
         - Keeps last 5 backups
         - Detailed statistics in header
         
@@ -232,49 +276,52 @@ class BlacklistWriter:
                 self.logger.error(f"🚨 Only {len(ips_info)} IPs - possible corruption")
                 raise ValueError(f"Blacklist too small: {len(ips_info)} IPs")
         
-        # Automatic backup
-        if path.exists():
-            backup_path = Path(str(path) + f".backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-            try:
-                import shutil
-                shutil.copy2(path, backup_path)
-                self.logger.info(f"💾 Backup: {backup_path.name}")
-                self._cleanup_old_backups(path, keep=5)
-            except Exception as e:
-                self.logger.warning(f"Backup failed: {e}")
-        
-        # Calculate statistics
-        total_ips = len(ips_info)
-        high_conf = sum(1 for info in ips_info.values() if info.get('confidence') == 'high')
-        medium_conf = sum(1 for info in ips_info.values() if info.get('confidence') == 'medium')
-        total_events = sum(info.get('event_count', 0) for info in ips_info.values())
-        with_geo = sum(1 for info in ips_info.values() if info.get('geolocation'))
-        
-        # Write file with header
-        with open(path, 'w') as f:
-            f.write(f"# {'='*118}\n")
-            f.write(f"# ENHANCED BLACKLIST - COMPREHENSIVE THREAT INTELLIGENCE\n")
-            f.write(f"# {'='*118}\n")
-            f.write(f"# Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n#\n")
-            f.write(f"# STATISTICS:\n")
-            f.write(f"#   Total IPs: {total_ips} (New: {new_count})\n")
-            f.write(f"#   High Confidence: {high_conf} | Medium: {medium_conf}\n")
-            f.write(f"#   Total Events: {total_events}\n")
-            f.write(f"#   With Geolocation: {with_geo} ({with_geo/total_ips*100:.1f}%)\n")
-            f.write(f"# {'='*118}\n\n")
+        # FILE LOCKING: Previne escrita concorrente
+        with self._file_lock(path):
+            # Automatic backup
+            if path.exists():
+                backup_path = Path(str(path) + f".backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                try:
+                    import shutil
+                    shutil.copy2(path, backup_path)
+                    self.logger.info(f"💾 Backup: {backup_path.name}")
+                    self._cleanup_old_backups(path, keep=5)
+                except Exception as e:
+                    self.logger.warning(f"Backup failed: {e}")
             
-            # Group by source
-            by_source = self._group_by_source(ips_info)
+            # Calculate statistics
+            total_ips = len(ips_info)
+            high_conf = sum(1 for info in ips_info.values() if info.get('confidence') == 'high')
+            medium_conf = sum(1 for info in ips_info.values() if info.get('confidence') == 'medium')
+            total_events = sum(info.get('event_count', 0) for info in ips_info.values())
+            with_geo = sum(1 for info in ips_info.values() if info.get('geolocation'))
             
-            for source, ips in by_source.items():
-                if ips:
-                    f.write(f"\n# {'-'*118}\n")
-                    f.write(f"# SOURCE: {source.upper()} ({len(ips)} IPs)\n")
-                    f.write(f"# {'-'*118}\n\n")
-                    
-                    for ip_str in sorted(ips.keys(), key=lambda x: ipaddress.ip_address(x)):
-                        self._write_ip_entry(f, ip_str, ips[ip_str])
+            # Write file with header
+            with open(path, 'w') as f:
+                f.write(f"# {'='*118}\n")
+                f.write(f"# ENHANCED BLACKLIST - COMPREHENSIVE THREAT INTELLIGENCE\n")
+                f.write(f"# {'='*118}\n")
+                f.write(f"# Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n#\n")
+                f.write(f"# STATISTICS:\n")
+                f.write(f"#   Total IPs: {total_ips} (New: {new_count})\n")
+                f.write(f"#   High Confidence: {high_conf} | Medium: {medium_conf}\n")
+                f.write(f"#   Total Events: {total_events}\n")
+                f.write(f"#   With Geolocation: {with_geo} ({with_geo/total_ips*100:.1f}%)\n")
+                f.write(f"# {'='*118}\n\n")
+                
+                # Group by source
+                by_source = self._group_by_source(ips_info)
+                
+                for source, ips in by_source.items():
+                    if ips:
+                        f.write(f"\n# {'-'*118}\n")
+                        f.write(f"# SOURCE: {source.upper()} ({len(ips)} IPs)\n")
+                        f.write(f"# {'-'*118}\n\n")
+                        
+                        for ip_str in sorted(ips.keys(), key=lambda x: ipaddress.ip_address(x)):
+                            self._write_ip_entry(f, ip_str, ips[ip_str])
         
+        # Log após liberar o lock
         if new_count > 0:
             self.logger.info(f"📝 Blacklist updated: {total_ips} IPs (+{new_count} new)")
     

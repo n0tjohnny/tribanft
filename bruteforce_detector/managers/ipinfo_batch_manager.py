@@ -9,6 +9,7 @@ Features:
 - Rate limiting (1000/day, 15/minute)
 - Persistent caching to minimize API calls
 - Batch processing with priority for cached data
+- DATABASE SUPPORT via BlacklistAdapter
 
 Used as systemd service for background geolocation enrichment.
 
@@ -26,7 +27,7 @@ from datetime import datetime
 import ipaddress
 import requests
 
-from bruteforce_detector.managers.blacklist_writer import BlacklistWriter
+from bruteforce_detector.managers.blacklist_adapter import BlacklistAdapter
 
 
 class IPInfoBatchManager:
@@ -36,7 +37,7 @@ class IPInfoBatchManager:
         """Initialize batch manager with config and API token."""
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.blacklist_writer = BlacklistWriter(config)
+        self.blacklist_adapter = BlacklistAdapter(config, use_database=config.use_database)
         
         self.api_token = api_token or self._load_token()
         self.base_url = "https://ipinfo.io"
@@ -218,7 +219,7 @@ class IPInfoBatchManager:
             self.logger.warning("⚠️  Blacklist not found")
             return 0
         
-        existing = self.blacklist_writer.read_blacklist(str(blacklist_path))
+        existing = self.blacklist_adapter.read_blacklist(str(blacklist_path))
         
         # Find IPs without geo
         ips_without_geo = []
@@ -277,10 +278,10 @@ class IPInfoBatchManager:
         
         self.logger.info(f"💾 Cache: {from_cache} | 🌐 API: {from_api}")
         
-        # Save updates
+        # Save updates usando adapter (suporta database + file sync)
         if ips_to_update:
             existing.update(ips_to_update)
-            self.blacklist_writer.write_blacklist(str(blacklist_path), existing, len(ips_to_update))
+            self.blacklist_adapter.write_blacklist(str(blacklist_path), existing, len(ips_to_update))
             self._save_results()
             self._save_stats()
         
@@ -333,3 +334,15 @@ class IPInfoBatchManager:
             'cache_hits': self.stats.get('cache_hits', 0),
             'api_calls': self.stats.get('api_calls', 0)
         }
+    
+    def print_stats(self):
+        """Print statistics."""
+        stats = self.get_stats_summary()
+        print("\n📊 IPINFO BATCH STATISTICS")
+        print("="*70)
+        print(f"  Requests Today:    {stats['requests_today']}/{stats['daily_limit']}")
+        print(f"  Remaining Today:   {stats['remaining_today']}")
+        print(f"  Cache Size:        {stats['cache_size']:,} IPs")
+        print(f"  Cache Hits:        {stats['cache_hits']:,}")
+        print(f"  API Calls (total): {stats['api_calls']:,}")
+        print("="*70)
