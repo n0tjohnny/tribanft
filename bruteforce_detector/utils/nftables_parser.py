@@ -14,7 +14,7 @@ License: GNU GPL v3
 
 import re
 import ipaddress
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import logging
 
@@ -110,7 +110,7 @@ def calculate_detection_date(timeout_str: str, expiry_str: str) -> Optional[date
     time_elapsed = timeout - expires
     
     # Detection date is current time minus elapsed time
-    detection_date = datetime.now() - time_elapsed
+    detection_date = datetime.now(timezone.utc) - time_elapsed
     
     return detection_date
 
