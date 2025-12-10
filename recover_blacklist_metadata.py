@@ -43,10 +43,10 @@ DEPRECATION NOTICE:
   This script is deprecated. Use 'tribanft' command instead.
   
 Examples (NEW COMMANDS):
-  tribanft --stats-only                        # Show database statistics
-  tribanft --sync-files                        # Sync database to default file
+  tribanft --stats-only                               # Show database statistics (replaces --stats)
+  tribanft --sync-files --sync-stats                  # Sync database to default file with stats
   tribanft --sync-files --sync-output /tmp/test.txt   # Sync to custom file
-  tribanft --sync-files --sync-stats           # Sync with before/after stats
+  tribanft --sync-files --sync-stats --sync-output /tmp/test.txt   # Custom file with stats
         """
     )
     
@@ -80,11 +80,12 @@ Examples (NEW COMMANDS):
         # Map --stats to --stats-only
         cmd.append('--stats-only')
     else:
-        # Map default behavior to --sync-files
+        # Map default behavior to --sync-files with stats
+        # Note: old script always showed stats before sync
         cmd.append('--sync-files')
-        cmd.append('--sync-stats')  # Show stats for better visibility
+        cmd.append('--sync-stats')  # Show stats to match old behavior
         
-        # Map --output to --sync-output
+        # Map --output to --sync-output (only if not default)
         if args.output != '/root/blacklist_ipv4.txt':
             cmd.extend(['--sync-output', args.output])
     

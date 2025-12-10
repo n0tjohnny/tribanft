@@ -294,8 +294,6 @@ class IPInfoBatchManager:
                 self._save_stats()
             
             return len(ips_to_update)
-        
-        return len(ips_to_update)
     
     def _normalize_ipinfo_response(self, data: Dict) -> Dict:
         """Normalize to IP-API format."""
@@ -314,7 +312,7 @@ class IPInfoBatchManager:
         with self.file_lock("cache save"):
             try:
                 # Atomic write pattern: write to temp file, then rename
-                temp_file = Path(str(self.results_file) + '.tmp')
+                temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
                 
                 with open(temp_file, 'w', encoding='utf-8') as f:
                     json.dump(self.cache, f, indent=2, ensure_ascii=False)
@@ -325,7 +323,7 @@ class IPInfoBatchManager:
             except Exception as e:
                 self.logger.error(f"Save error: {e}")
                 # Clean up temp file if it exists
-                temp_file = Path(str(self.results_file) + '.tmp')
+                temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
                 if temp_file.exists():
                     temp_file.unlink()
     
@@ -334,7 +332,7 @@ class IPInfoBatchManager:
         with self.file_lock("stats save"):
             try:
                 # Atomic write pattern: write to temp file, then rename
-                temp_file = Path(str(self.stats_file) + '.tmp')
+                temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
                 
                 with open(temp_file, 'w') as f:
                     json.dump(self.stats, f, indent=2)
@@ -345,7 +343,7 @@ class IPInfoBatchManager:
             except Exception as e:
                 self.logger.error(f"Save stats error: {e}")
                 # Clean up temp file if it exists
-                temp_file = Path(str(self.stats_file) + '.tmp')
+                temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
                 if temp_file.exists():
                     temp_file.unlink()
     

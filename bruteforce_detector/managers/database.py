@@ -139,8 +139,14 @@ class BlacklistDatabase:
             except sqlite3.OperationalError as e:
                 error_msg = str(e).lower()
                 
-                # Check if it's a lock-related error
-                if ("database is locked" in error_msg or "locked" in error_msg) and attempt < max_retries - 1:
+                # Check if it's a lock-related error (more robust error detection)
+                is_lock_error = (
+                    "database is locked" in error_msg or
+                    "locked" in error_msg or
+                    e.args[0] if e.args else "" in ["database is locked", "database table is locked"]
+                )
+                
+                if is_lock_error and attempt < max_retries - 1:
                     self.logger.warning(
                         f"⏳ Database locked on attempt {attempt + 1}/{max_retries}, "
                         f"retrying in {retry_delay:.2f}s..."
