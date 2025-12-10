@@ -252,8 +252,12 @@ class BlacklistManager:
                 if new_last and (not existing_last or new_last > existing_last):
                     existing_entry['last_seen'] = new_last
                 
-                # Increment event count
-                existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_metadata.get('event_count', 0)
+                # For enrichment updates (from NFTables/CrowdSec), use max event count
+                # rather than incrementing to avoid inflation from repeated enrichment
+                new_count = new_metadata.get('event_count', 0)
+                existing_count = existing_entry.get('event_count', 0)
+                if new_count > existing_count:
+                    existing_entry['event_count'] = new_count
             else:
                 # New IP - add it
                 existing[ip_str] = new_metadata

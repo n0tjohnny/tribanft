@@ -20,6 +20,7 @@ License: GNU GPL v3
 
 import subprocess
 import logging
+import shutil
 from typing import Set, Tuple, Dict
 import ipaddress
 from datetime import datetime
@@ -191,9 +192,12 @@ class NFTablesSync:
             }
         """
         try:
+            # Find nft executable
+            nft_path = shutil.which('nft') or '/usr/sbin/nft'
+            
             # Query NFTables ruleset
             result = subprocess.run(
-                ['/usr/sbin/nft', 'list', 'ruleset'],
+                [nft_path, 'list', 'ruleset'],
                 capture_output=True,
                 text=True,
                 timeout=30

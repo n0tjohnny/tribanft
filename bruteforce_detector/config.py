@@ -83,8 +83,8 @@ class DetectorConfig(BaseSettings):
     )
     
     # Metadata enrichment settings
+    # Enrichment runs automatically during detection cycle to prevent metadata loss
     enable_auto_enrichment: bool = True
-    enrichment_interval_hours: int = 6  # Run enrichment every 6 hours
 
     class Config:
         """Pydantic configuration"""

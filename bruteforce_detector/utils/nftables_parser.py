@@ -13,6 +13,7 @@ License: GNU GPL v3
 """
 
 import re
+import ipaddress
 from datetime import datetime, timedelta
 from typing import Optional
 import logging
@@ -63,12 +64,8 @@ def parse_expiry_to_timedelta(expiry_str: str) -> Optional[timedelta]:
         
         # Parse seconds (exclude milliseconds)
         if 's' in expiry_str:
-            # Match digits followed by 's' but not followed by more digits (to exclude 'ms')
-            # This regex looks for number + 's' where 's' is not preceded by 'm'
-            match = re.search(r'(\d+)s(?![\dms])', expiry_str)
-            if not match:
-                # Try alternative pattern: digits followed by 's' with optional 'ms' after
-                match = re.search(r'(\d+)s(?=\d+ms|$|\s)', expiry_str)
+            # Match digits followed by 's' but not when 's' is part of 'ms' (milliseconds)
+            match = re.search(r'(\d+)s(?!ms)', expiry_str)
             if match:
                 seconds = int(match.group(1))
         
@@ -201,12 +198,20 @@ def parse_nftables_set_elements(output: str, set_name: str = 'port_scanners') ->
     
     # Parse individual IP entries
     # Format: IP timeout Xd expires Xd...
+    # Note: This regex permits octets 0-999; validation with ipaddress.ip_address() follows
     ip_pattern = r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(?:timeout\s+(\S+))?\s*(?:expires\s+(\S+))?'
     
     for match in re.finditer(ip_pattern, elements_content):
         ip = match.group(1)
         timeout = match.group(2) or default_timeout
         expires = match.group(3)
+        
+        # Validate IP address format
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            logger.debug(f"Invalid IP address: {ip}")
+            continue
         
         # Clean up timeout and expires (remove trailing commas/spaces)
         if timeout:
