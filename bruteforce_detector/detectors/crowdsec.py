@@ -11,6 +11,7 @@ Extracts IP, scenario, events, timestamp, country, and ISP data.
 import subprocess
 import json
 import logging
+import ipaddress
 from typing import List, Dict
 from datetime import datetime
 
@@ -360,3 +361,90 @@ class CrowdSecDetector(BaseDetector):
         scenario_name = scenario.replace('crowdsecurity/', '').replace('-', ' ').title()
         
         return f"CrowdSec: {scenario_name} ({events} events)"
+    
+    def enrich_from_historical_alerts(self, existing_ips: set) -> Dict[str, Dict]:
+        """
+        Query CrowdSec historical alerts for existing blacklisted IPs.
+        
+        For IPs already in blacklist but potentially missing metadata,
+        fetch enrichment data from CrowdSec alerts API:
+        - Original detection reason (scenario)
+        - Event counts
+        - Timestamps (created_at)
+        - Geolocation (country, AS/ISP)
+        
+        Uses: cscli alerts list -o json
+        
+        Args:
+            existing_ips: Set of IP strings currently in blacklist
+            
+        Returns:
+            Dict of metadata to merge with existing entries:
+            {
+                '1.2.3.4': {
+                    'ip': IPv4Address('1.2.3.4'),
+                    'reason': 'CrowdSec: ...',
+                    'confidence': 'high',
+                    'event_count': 5,
+                    'first_seen': datetime(...),
+                    'last_seen': datetime(...),
+                    'geolocation': {'country': 'US', 'isp': '...'},
+                    'source': 'crowdsec_alerts'
+                }
+            }
+        """
+        if not existing_ips:
+            return {}
+        
+        try:
+            # Query historical alerts
+            alert_ips = self._get_crowdsec_alerts()
+            
+            if not alert_ips:
+                self.logger.debug("No CrowdSec historical alerts found")
+                return {}
+            
+            # Filter to only IPs that are in existing blacklist
+            enrichment_data = {}
+            
+            for ip_str, alert_metadata in alert_ips.items():
+                if ip_str not in existing_ips:
+                    continue
+                
+                try:
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    
+                    # Build enrichment metadata
+                    enrichment_data[ip_str] = {
+                        'ip': ip_obj,
+                        'reason': self._format_crowdsec_reason(alert_metadata),
+                        'confidence': 'high',
+                        'event_count': alert_metadata.get('events', 1),
+                        'first_seen': alert_metadata.get('timestamp'),
+                        'last_seen': alert_metadata.get('timestamp'),
+                        'date_added': alert_metadata.get('timestamp'),
+                        'source': 'crowdsec_alerts'
+                    }
+                    
+                    # Add geolocation if available
+                    if alert_metadata.get('country') or alert_metadata.get('as_name'):
+                        enrichment_data[ip_str]['geolocation'] = {
+                            'country': alert_metadata.get('country', 'Unknown'),
+                            'isp': alert_metadata.get('as_name', 'Unknown ISP'),
+                            'city': ''
+                        }
+                    
+                except ValueError as e:
+                    self.logger.warning(f"Invalid IP in CrowdSec alerts: {ip_str}: {e}")
+                    continue
+            
+            if enrichment_data:
+                self.logger.info(f"Found metadata for {len(enrichment_data)} IPs from CrowdSec alerts")
+            
+            return enrichment_data
+            
+        except Exception as e:
+            self.logger.error(f"Error enriching from CrowdSec alerts: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            return {}

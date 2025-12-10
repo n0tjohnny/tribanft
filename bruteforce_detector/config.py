@@ -81,6 +81,10 @@ class DetectorConfig(BaseSettings):
     default=True,
     description="When using database, also sync changes to blacklist files for compatibility"
     )
+    
+    # Metadata enrichment settings
+    # Enrichment runs automatically during detection cycle to prevent metadata loss
+    enable_auto_enrichment: bool = True
 
     class Config:
         """Pydantic configuration"""

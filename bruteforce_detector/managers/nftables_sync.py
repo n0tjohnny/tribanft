@@ -20,11 +20,13 @@ License: GNU GPL v3
 
 import subprocess
 import logging
-from typing import Set, Tuple
+import shutil
+from typing import Set, Tuple, Dict
 import ipaddress
 from datetime import datetime
 
 from ..config import get_config
+from ..utils.nftables_parser import parse_nftables_set_elements
 
 
 class NFTablesSync:
@@ -159,3 +161,100 @@ class NFTablesSync:
         """
         # Implementation would read blacklist and add to nft
         return 0
+    
+    def get_port_scanners(self) -> Dict[str, Dict]:
+        """
+        Get IPs from NFTables port_scanners set with calculated timestamps.
+        
+        Parses the port_scanners NFTables set and extracts:
+        - IP addresses
+        - Timeout values (e.g., "10d")
+        - Expiry remaining (e.g., "8d12h21m34s")
+        - Calculated detection date (now - elapsed time)
+        
+        Formula: detection_date = now - (timeout - expires)
+        
+        Returns:
+            Dict mapping IP to metadata with timestamps:
+            {
+                '1.2.3.4': {
+                    'ip': IPv4Address('1.2.3.4'),
+                    'reason': 'Port scanner (NFTables)',
+                    'confidence': 'high',
+                    'event_count': 1,
+                    'first_seen': datetime(...),
+                    'last_seen': datetime(...),
+                    'date_added': datetime(...),
+                    'source': 'nftables_port_scanners',
+                    'timeout': '10d',
+                    'expires': '8d12h21m34s'
+                }
+            }
+        """
+        try:
+            # Find nft executable
+            nft_path = shutil.which('nft') or '/usr/sbin/nft'
+            
+            # Query NFTables ruleset
+            result = subprocess.run(
+                [nft_path, 'list', 'ruleset'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                self.logger.error(f"NFTables query failed: {result.stderr}")
+                return {}
+            
+            # Parse port_scanners set
+            parsed = parse_nftables_set_elements(result.stdout, 'port_scanners')
+            
+            if not parsed:
+                self.logger.debug("No IPs found in port_scanners set")
+                return {}
+            
+            # Convert to blacklist metadata format
+            port_scanner_ips = {}
+            now = datetime.now()
+            
+            for ip_str, nft_data in parsed.items():
+                try:
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    
+                    # Skip whitelisted IPs
+                    if self.whitelist_manager.is_whitelisted(ip_obj):
+                        continue
+                    
+                    # Build metadata for blacklist
+                    port_scanner_ips[ip_str] = {
+                        'ip': ip_obj,
+                        'reason': 'Port scanner (NFTables)',
+                        'confidence': 'high',
+                        'event_count': 1,
+                        'first_seen': nft_data.get('first_seen', now),
+                        'last_seen': nft_data.get('last_seen', now),
+                        'date_added': nft_data.get('date_added', now),
+                        'source': 'nftables_port_scanners',
+                        'timeout': nft_data.get('timeout', 'unknown'),
+                        'expires': nft_data.get('expires', 'unknown')
+                    }
+                    
+                except ValueError as e:
+                    self.logger.warning(f"Invalid IP in port_scanners: {ip_str}: {e}")
+                    continue
+            
+            self.logger.info(f"Parsed {len(port_scanner_ips)} IPs from port_scanners set")
+            return port_scanner_ips
+            
+        except subprocess.TimeoutExpired:
+            self.logger.error("NFTables query timed out after 30 seconds")
+            return {}
+        except FileNotFoundError:
+            self.logger.error("nft command not found - is NFTables installed?")
+            return {}
+        except Exception as e:
+            self.logger.error(f"Error querying port_scanners: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            return {}

@@ -120,7 +120,8 @@ class BruteForceDetectorEngine:
         3. Run all enabled detectors on collected events
         4. Process detections (deduplicate, enrich with geolocation)
         5. Update blacklists and NFTables
-        6. Save current state for next run
+        6. Enrich metadata from authoritative sources (NFTables, CrowdSec)
+        7. Save current state for next run
         
         Returns:
             List of DetectionResult objects representing detected threats
@@ -162,6 +163,10 @@ class BruteForceDetectorEngine:
             self._process_detections(all_detections)
         else:
             self.logger.info("No new detections found")
+        
+        # Enrich metadata from authoritative sources
+        if self.config.enable_auto_enrichment:
+            self._enrich_metadata_from_sources()
         
         # Update processing state
         self.state_manager.update_state()
@@ -212,6 +217,71 @@ class BruteForceDetectorEngine:
             self.nftables_manager.update_blacklists(
                 self.blacklist_manager.get_all_blacklisted_ips()
             )
+    
+    def _enrich_metadata_from_sources(self):
+        """
+        Automatically enrich blacklist metadata from authoritative sources.
+        
+        Runs periodically during detection cycle:
+        1. Import port_scanners from NFTables with calculated timestamps
+        2. Enrich existing IPs with CrowdSec historical alert data
+        3. Update database/files with enriched metadata
+        4. Auto-sync to maintain consistency
+        
+        Prevents metadata loss by constantly refreshing from sources.
+        This ensures IPs never lose their context, geolocation, or detection reason.
+        """
+        self.logger.info("🔄 Enriching metadata from authoritative sources...")
+        
+        try:
+            # Get existing IPs
+            existing = self.blacklist_manager.get_all_blacklisted_ips()
+            existing_ipv4 = {str(ip) for ip in existing.get('ipv4', set())}
+            
+            enriched_data = {}
+            
+            # 1. Import from NFTables port_scanners set
+            if self.config.enable_nftables_update:
+                try:
+                    port_scanner_ips = self.blacklist_manager.nft_sync.get_port_scanners()
+                    if port_scanner_ips:
+                        enriched_data.update(port_scanner_ips)
+                        self.logger.info(f"   📥 Found {len(port_scanner_ips)} IPs in port_scanners")
+                except Exception as e:
+                    self.logger.warning(f"   ⚠️  Port scanner import failed: {e}")
+            
+            # 2. Enrich from CrowdSec historical alerts
+            if self.config.enable_crowdsec_integration:
+                try:
+                    # Find the CrowdSec detector
+                    crowdsec_detector = None
+                    for detector in self.detectors:
+                        if isinstance(detector, CrowdSecDetector):
+                            crowdsec_detector = detector
+                            break
+                    
+                    if crowdsec_detector:
+                        crowdsec_data = crowdsec_detector.enrich_from_historical_alerts(existing_ipv4)
+                        if crowdsec_data:
+                            # Merge CrowdSec data (only for IPs not already enriched)
+                            for ip_str, metadata in crowdsec_data.items():
+                                if ip_str not in enriched_data:
+                                    enriched_data[ip_str] = metadata
+                            self.logger.info(f"   📥 Enriched {len(crowdsec_data)} IPs from CrowdSec alerts")
+                except Exception as e:
+                    self.logger.warning(f"   ⚠️  CrowdSec enrichment failed: {e}")
+            
+            # 3. Update database/files with enriched metadata
+            if enriched_data:
+                self.blacklist_manager.bulk_update_metadata(enriched_data)
+                self.logger.info(f"   ✅ Updated {len(enriched_data)} IPs with enriched metadata")
+            else:
+                self.logger.info("   ℹ️  No new metadata to enrich")
+        
+        except Exception as e:
+            self.logger.error(f"   ❌ Metadata enrichment failed: {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
 
 
 def main():
