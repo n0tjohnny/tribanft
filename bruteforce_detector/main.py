@@ -200,7 +200,7 @@ class BruteForceDetectorEngine:
             for detection in unique_list:
                 if hasattr(self, 'geolocation_manager'):
                     # Only enrich geolocation if not already present (preserves CrowdSec data)
-                    if not detection.geolocation:
+                    if detection.geolocation is None:
                         geo_info = self.geolocation_manager.get_ip_info(detection.ip)
                         detection.geolocation = geo_info
         
