@@ -10,6 +10,7 @@ Features:
 - Persistent caching to minimize API calls
 - Batch processing with priority for cached data
 - DATABASE SUPPORT via BlacklistAdapter
+- File locking for concurrent operation safety
 
 Used as systemd service for background geolocation enrichment.
 
@@ -28,6 +29,7 @@ import ipaddress
 import requests
 
 from bruteforce_detector.managers.blacklist_adapter import BlacklistAdapter
+from bruteforce_detector.utils.file_lock import FileLockContext
 
 
 class IPInfoBatchManager:
@@ -51,6 +53,10 @@ class IPInfoBatchManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.results_file = Path("/root/projeto-ip-info-results.json")
         self.stats_file = self.cache_dir / "ipinfo_stats.json"
+        
+        # File locking for concurrent operation safety
+        self.lock_file = self.cache_dir / ".ipinfo.lock"
+        self.file_lock = FileLockContext(self.lock_file, timeout=30)
         
         # Auto-load caches
         self.cache = self._load_all_caches()
@@ -211,60 +217,44 @@ class IPInfoBatchManager:
         return None
     
     def process_blacklist_batch(self, max_requests: int = 100) -> int:
-        """Process blacklist with cache priority."""
+        """Process blacklist with cache priority and file locking."""
         self.logger.info("🔍 Processing blacklist...")
         
-        blacklist_path = Path(self.config.blacklist_ipv4_file)
-        if not blacklist_path.exists():
-            self.logger.warning("⚠️  Blacklist not found")
-            return 0
-        
-        existing = self.blacklist_adapter.read_blacklist(str(blacklist_path))
-        
-        # Find IPs without geo
-        ips_without_geo = []
-        for ip_str, info in existing.items():
-            try:
-                ipaddress.ip_address(ip_str)
-            except ValueError:
-                continue
+        # Use file lock to prevent concurrent modifications
+        with self.file_lock("blacklist batch processing"):
+            blacklist_path = Path(self.config.blacklist_ipv4_file)
+            if not blacklist_path.exists():
+                self.logger.warning("⚠️  Blacklist not found")
+                return 0
             
-            geo = info.get('geolocation')
-            if not geo or geo.get('country') in [None, 'Unknown', 'Unknown Location']:
-                ips_without_geo.append(ip_str)
-        
-        if not ips_without_geo:
-            self.logger.info("✅ All IPs have geo")
-            return 0
-        
-        self.logger.info(f"📋 {len(ips_without_geo)} IPs without geo")
-        
-        # Process with cache priority
-        from_cache = from_api = 0
-        ips_to_update = {}
-        
-        for ip_str in ips_without_geo:
-            # Cache hit
-            if ip_str in self.cache:
-                full_data = self.cache[ip_str]
-                normalized = self._normalize_ipinfo_response(full_data)
-                ips_to_update[ip_str] = {
-                    **existing[ip_str],
-                    'geolocation': {
-                        'country': normalized.get('country', 'Unknown'),
-                        'city': normalized.get('city', ''),
-                        'isp': normalized.get('org', 'Unknown ISP')
-                    }
-                }
-                from_cache += 1
+            existing = self.blacklist_adapter.read_blacklist(str(blacklist_path))
             
-            # API call (if under limit)
-            elif from_api < max_requests:
-                if not self._check_rate_limits():
+            # Find IPs without geo
+            ips_without_geo = []
+            for ip_str, info in existing.items():
+                try:
+                    ipaddress.ip_address(ip_str)
+                except ValueError:
                     continue
                 
-                full_data = self.get_ip_info(ip_str, use_cache=False)
-                if full_data:
+                geo = info.get('geolocation')
+                if not geo or geo.get('country') in [None, 'Unknown', 'Unknown Location']:
+                    ips_without_geo.append(ip_str)
+            
+            if not ips_without_geo:
+                self.logger.info("✅ All IPs have geo")
+                return 0
+            
+            self.logger.info(f"📋 {len(ips_without_geo)} IPs without geo")
+            
+            # Process with cache priority
+            from_cache = from_api = 0
+            ips_to_update = {}
+            
+            for ip_str in ips_without_geo:
+                # Cache hit
+                if ip_str in self.cache:
+                    full_data = self.cache[ip_str]
                     normalized = self._normalize_ipinfo_response(full_data)
                     ips_to_update[ip_str] = {
                         **existing[ip_str],
@@ -274,16 +264,36 @@ class IPInfoBatchManager:
                             'isp': normalized.get('org', 'Unknown ISP')
                         }
                     }
-                    from_api += 1
-        
-        self.logger.info(f"💾 Cache: {from_cache} | 🌐 API: {from_api}")
-        
-        # Save updates usando adapter (suporta database + file sync)
-        if ips_to_update:
-            existing.update(ips_to_update)
-            self.blacklist_adapter.write_blacklist(str(blacklist_path), existing, len(ips_to_update))
-            self._save_results()
-            self._save_stats()
+                    from_cache += 1
+                
+                # API call (if under limit)
+                elif from_api < max_requests:
+                    if not self._check_rate_limits():
+                        continue
+                    
+                    full_data = self.get_ip_info(ip_str, use_cache=False)
+                    if full_data:
+                        normalized = self._normalize_ipinfo_response(full_data)
+                        ips_to_update[ip_str] = {
+                            **existing[ip_str],
+                            'geolocation': {
+                                'country': normalized.get('country', 'Unknown'),
+                                'city': normalized.get('city', ''),
+                                'isp': normalized.get('org', 'Unknown ISP')
+                            }
+                        }
+                        from_api += 1
+            
+            self.logger.info(f"💾 Cache: {from_cache} | 🌐 API: {from_api}")
+            
+            # Save updates usando adapter (suporta database + file sync)
+            if ips_to_update:
+                existing.update(ips_to_update)
+                self.blacklist_adapter.write_blacklist(str(blacklist_path), existing, len(ips_to_update))
+                self._save_results()
+                self._save_stats()
+            
+            return len(ips_to_update)
         
         return len(ips_to_update)
     
@@ -300,28 +310,44 @@ class IPInfoBatchManager:
         }
     
     def _save_results(self):
-        """Save cache to JSON."""
-        try:
-            if self.results_file.exists():
-                backup = Path(str(self.results_file) + '.backup')
-                self.results_file.rename(backup)
-            
-            with open(self.results_file, 'w', encoding='utf-8') as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-            
-            backup = Path(str(self.results_file) + '.backup')
-            if backup.exists():
-                backup.unlink()
-        except Exception as e:
-            self.logger.error(f"Save error: {e}")
+        """Save cache to JSON with file locking and atomic write."""
+        with self.file_lock("cache save"):
+            try:
+                # Atomic write pattern: write to temp file, then rename
+                temp_file = Path(str(self.results_file) + '.tmp')
+                
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.cache, f, indent=2, ensure_ascii=False)
+                
+                # Atomic rename
+                temp_file.replace(self.results_file)
+                
+            except Exception as e:
+                self.logger.error(f"Save error: {e}")
+                # Clean up temp file if it exists
+                temp_file = Path(str(self.results_file) + '.tmp')
+                if temp_file.exists():
+                    temp_file.unlink()
     
     def _save_stats(self):
-        """Save statistics to file."""
-        try:
-            with open(self.stats_file, 'w') as f:
-                json.dump(self.stats, f, indent=2)
-        except Exception as e:
-            self.logger.error(f"Save stats error: {e}")
+        """Save statistics to file with file locking and atomic write."""
+        with self.file_lock("stats save"):
+            try:
+                # Atomic write pattern: write to temp file, then rename
+                temp_file = Path(str(self.stats_file) + '.tmp')
+                
+                with open(temp_file, 'w') as f:
+                    json.dump(self.stats, f, indent=2)
+                
+                # Atomic rename
+                temp_file.replace(self.stats_file)
+                
+            except Exception as e:
+                self.logger.error(f"Save stats error: {e}")
+                # Clean up temp file if it exists
+                temp_file = Path(str(self.stats_file) + '.tmp')
+                if temp_file.exists():
+                    temp_file.unlink()
     
     def get_stats_summary(self) -> Dict[str, Any]:
         """Get statistics summary."""

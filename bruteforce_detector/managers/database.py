@@ -25,6 +25,7 @@ from datetime import datetime
 import json
 import logging
 import ipaddress
+import time
 
 
 class BlacklistDatabase:
@@ -45,6 +46,9 @@ class BlacklistDatabase:
     def _init_db(self):
         """Create database tables and indexes if they don't exist."""
         with sqlite3.connect(self.db_path) as conn:
+            # Enable WAL mode for better concurrent read/write performance
+            conn.execute("PRAGMA journal_mode=WAL")
+            
             # Main blacklist table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS blacklist (
@@ -81,41 +85,76 @@ class BlacklistDatabase:
         Converts datetime objects to ISO strings for SQLite storage.
         Stores event_types in metadata JSON field.
         
+        Implements retry logic with exponential backoff for concurrent access.
+        
         Args:
             ips_info: Dict mapping IP string to metadata dict
             
         Returns:
             Number of IPs successfully added/updated
-        """
-        added = 0
-        
-        with sqlite3.connect(self.db_path) as conn:
-            for ip_str, info in ips_info.items():
-                try:
-                    ip = ipaddress.ip_address(ip_str)
-                    
-                    # Verificar se IP já existe
-                    existing = conn.execute(
-                        "SELECT * FROM blacklist WHERE ip = ?", 
-                        (ip_str,)
-                    ).fetchone()
-                    
-                    if existing:
-                        # UPDATE: atualizar apenas campos fornecidos
-                        self._update_existing_ip(conn, ip_str, info, existing)
-                    else:
-                        # INSERT: novo IP completo
-                        self._insert_new_ip(conn, ip_str, ip, info)
-                    
-                    added += 1
-                    
-                except Exception as e:
-                    self.logger.warning(f"Skipped {ip_str}: {e}")
-                    continue
             
-            conn.commit()
+        Raises:
+            sqlite3.OperationalError: If database remains locked after max retries
+        """
+        max_retries = 5
+        retry_delay = 0.1  # Start with 100ms
         
-        return added
+        for attempt in range(max_retries):
+            try:
+                added = 0
+                
+                # Use timeout and IMMEDIATE transaction for write lock
+                with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                    # Begin IMMEDIATE transaction to acquire write lock immediately
+                    conn.execute("BEGIN IMMEDIATE")
+                    
+                    for ip_str, info in ips_info.items():
+                        try:
+                            ip = ipaddress.ip_address(ip_str)
+                            
+                            # Verificar se IP já existe
+                            existing = conn.execute(
+                                "SELECT * FROM blacklist WHERE ip = ?", 
+                                (ip_str,)
+                            ).fetchone()
+                            
+                            if existing:
+                                # UPDATE: atualizar apenas campos fornecidos
+                                self._update_existing_ip(conn, ip_str, info, existing)
+                            else:
+                                # INSERT: novo IP completo
+                                self._insert_new_ip(conn, ip_str, ip, info)
+                            
+                            added += 1
+                            
+                        except Exception as e:
+                            self.logger.warning(f"Skipped {ip_str}: {e}")
+                            continue
+                    
+                    conn.commit()
+                
+                # Success - return result
+                return added
+                
+            except sqlite3.OperationalError as e:
+                error_msg = str(e).lower()
+                
+                # Check if it's a lock-related error
+                if ("database is locked" in error_msg or "locked" in error_msg) and attempt < max_retries - 1:
+                    self.logger.warning(
+                        f"⏳ Database locked on attempt {attempt + 1}/{max_retries}, "
+                        f"retrying in {retry_delay:.2f}s..."
+                    )
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+                else:
+                    # Non-lock error or max retries exceeded
+                    self.logger.error(f"❌ Database operation failed: {e}")
+                    raise
+        
+        # Should not reach here, but just in case
+        raise sqlite3.OperationalError("Failed to complete bulk_add after all retries")
     
     def _update_existing_ip(self, conn, ip_str: str, new_info: Dict, existing_row):
         """
