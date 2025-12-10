@@ -317,10 +317,53 @@ class BlacklistManager:
         
         Handles merging of automatic detections, manual additions, and
         existing entries while preserving metadata and timestamps.
+        
+        FIXED: Preserves existing metadata when re-detecting IPs.
+        Only updates timestamps and increments event counts.
         """
         existing = self.writer.read_blacklist(filename)
         manual = self._get_manual_ips_info()
-        all_ips = self._filter_whitelisted_ips({**existing, **manual, **new_ips_info})
+        
+        # INTELLIGENT MERGE: Preserve existing metadata
+        merged = existing.copy()
+        
+        for ip_str, new_info in new_ips_info.items():
+            if ip_str in existing:
+                # IP already exists - UPDATE only timestamps and events
+                existing_entry = merged[ip_str]
+                
+                # Preserve original metadata (reason, confidence, source, first_seen, date_added)
+                # Update last_seen to most recent timestamp (use max to ensure forward progression)
+                new_last_seen = new_info.get('last_seen')
+                existing_last_seen = existing_entry.get('last_seen')
+                if new_last_seen and existing_last_seen:
+                    existing_entry['last_seen'] = max(new_last_seen, existing_last_seen)
+                elif new_last_seen:
+                    existing_entry['last_seen'] = new_last_seen
+                
+                # Increment event count (accumulate total events seen)
+                # Note: This counts total detection events, not unique incidents
+                existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_info.get('event_count', 0)
+                
+                # Merge event_types (union of both sets)
+                existing_types = set(existing_entry.get('event_types', []))
+                new_types = set(new_info.get('event_types', []))
+                existing_entry['event_types'] = list(existing_types | new_types)
+                
+                # Keep original first_seen, date_added, reason, confidence, source
+                # (Don't overwrite with new_info values)
+                
+            else:
+                # New IP - add completely
+                merged[ip_str] = new_info
+        
+        # Add manual IPs (they take precedence over automatic)
+        # Manual entries completely override any existing automatic detections
+        for ip_str, manual_info in manual.items():
+            merged[ip_str] = manual_info
+        
+        # Filter whitelisted
+        all_ips = self._filter_whitelisted_ips(merged)
         new_count = len(set(new_ips_info.keys()) - set(existing.keys()))
         self.writer.write_blacklist(filename, all_ips, new_count)
     
