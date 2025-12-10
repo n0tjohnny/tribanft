@@ -358,13 +358,9 @@ class BlacklistManager:
                 merged[ip_str] = new_info
         
         # Add manual IPs (they take precedence over automatic)
+        # Manual entries completely override any existing automatic detections
         for ip_str, manual_info in manual.items():
-            if ip_str in merged:
-                # Manual entry exists - override with manual metadata completely
-                # This ensures manual entries always have consistent manual metadata
-                merged[ip_str] = manual_info
-            else:
-                merged[ip_str] = manual_info
+            merged[ip_str] = manual_info
         
         # Filter whitelisted
         all_ips = self._filter_whitelisted_ips(merged)
