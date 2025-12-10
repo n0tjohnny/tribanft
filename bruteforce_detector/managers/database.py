@@ -140,10 +140,10 @@ class BlacklistDatabase:
                 error_msg = str(e).lower()
                 
                 # Check if it's a lock-related error (more robust error detection)
+                # Check both the error message string and errno if available
                 is_lock_error = (
                     "database is locked" in error_msg or
-                    "locked" in error_msg or
-                    e.args[0] if e.args else "" in ["database is locked", "database table is locked"]
+                    "locked" in error_msg
                 )
                 
                 if is_lock_error and attempt < max_retries - 1:

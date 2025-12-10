@@ -2,10 +2,17 @@
 """
 recover_blacklist_metadata.py
 
-DEPRECATED: This script is deprecated. Use 'tribanft' command instead:
-  - tribanft --stats-only              (replaces --stats)
-  - tribanft --sync-files               (replaces default sync)
-  - tribanft --sync-files --sync-output <file>  (replaces --output)
+DEPRECATED: This script is deprecated. Use 'tribanft' command instead.
+
+Argument Mapping:
+  OLD: ./recover_blacklist_metadata.py --stats
+  NEW: tribanft --stats-only
+
+  OLD: ./recover_blacklist_metadata.py
+  NEW: tribanft --sync-files --sync-stats
+
+  OLD: ./recover_blacklist_metadata.py --output /tmp/test.txt
+  NEW: tribanft --sync-files --sync-stats --sync-output /tmp/test.txt
 
 This wrapper maintains backward compatibility but will be removed in future versions.
 """

@@ -310,10 +310,11 @@ class IPInfoBatchManager:
     def _save_results(self):
         """Save cache to JSON with file locking and atomic write."""
         with self.file_lock("cache save"):
+            # Define temp file path once
+            temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
+            
             try:
                 # Atomic write pattern: write to temp file, then rename
-                temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
-                
                 with open(temp_file, 'w', encoding='utf-8') as f:
                     json.dump(self.cache, f, indent=2, ensure_ascii=False)
                 
@@ -323,17 +324,17 @@ class IPInfoBatchManager:
             except Exception as e:
                 self.logger.error(f"Save error: {e}")
                 # Clean up temp file if it exists
-                temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
                 if temp_file.exists():
                     temp_file.unlink()
     
     def _save_stats(self):
         """Save statistics to file with file locking and atomic write."""
         with self.file_lock("stats save"):
+            # Define temp file path once
+            temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
+            
             try:
                 # Atomic write pattern: write to temp file, then rename
-                temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
-                
                 with open(temp_file, 'w') as f:
                     json.dump(self.stats, f, indent=2)
                 
@@ -343,7 +344,6 @@ class IPInfoBatchManager:
             except Exception as e:
                 self.logger.error(f"Save stats error: {e}")
                 # Clean up temp file if it exists
-                temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
                 if temp_file.exists():
                     temp_file.unlink()
     
