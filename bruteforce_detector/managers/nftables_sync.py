@@ -23,7 +23,7 @@ import logging
 import shutil
 from typing import Set, Tuple, Dict
 import ipaddress
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..config import get_config
 from ..utils.nftables_parser import parse_nftables_set_elements
@@ -216,7 +216,7 @@ class NFTablesSync:
             
             # Convert to blacklist metadata format
             port_scanner_ips = {}
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             
             for ip_str, nft_data in parsed.items():
                 try:
