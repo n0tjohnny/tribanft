@@ -197,9 +197,9 @@ def parse_nftables_set_elements(output: str, set_name: str = 'port_scanners') ->
     elements_content = elements_match.group(1)
     
     # Parse individual IP entries
-    # Format: IP timeout Xd expires Xd...
+    # Format: IP [limit rate over X/minute] timeout Xd expires Xd...
     # Note: This regex permits octets 0-999; validation with ipaddress.ip_address() follows
-    ip_pattern = r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(?:timeout\s+(\S+))?\s*(?:expires\s+(\S+))?'
+    ip_pattern = r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(?:limit\s+rate\s+over\s+\S+\s+)?(?:timeout\s+(\S+))?\s*(?:expires\s+(\S+))?'
     
     for match in re.finditer(ip_pattern, elements_content):
         ip = match.group(1)

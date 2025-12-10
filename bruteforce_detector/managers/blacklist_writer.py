@@ -378,7 +378,7 @@ class BlacklistWriter:
     def _group_by_source(self, ips_info: Dict[str, Dict]) -> Dict[str, Dict]:
         """Organize IPs by detection source."""
         by_source = {
-            'automatic': {}, 'manual': {}, 'nftables': {},
+            'automatic': {}, 'manual': {}, 'nftables': {}, 'nftables_port_scanners': {},
             'crowdsec': {}, 'legacy': {}
         }
         
