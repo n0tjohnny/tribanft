@@ -81,6 +81,10 @@ class DetectorConfig(BaseSettings):
     default=True,
     description="When using database, also sync changes to blacklist files for compatibility"
     )
+    
+    # Metadata enrichment settings
+    enable_auto_enrichment: bool = True
+    enrichment_interval_hours: int = 6  # Run enrichment every 6 hours
 
     class Config:
         """Pydantic configuration"""

@@ -175,6 +175,92 @@ class BlacklistManager:
             self.logger.error(f"❌ NFTables sync error: {e}")
             return 0, 0
     
+    def bulk_update_metadata(self, metadata_updates: Dict[str, Dict]):
+        """
+        Bulk update metadata for existing IPs.
+        
+        Used by automatic enrichment to update IPs with data from
+        NFTables port_scanners and CrowdSec historical alerts.
+        
+        Intelligently merges new metadata with existing entries:
+        - Preserves original detection reason and timestamps
+        - Updates geolocation if missing
+        - Increments event counts
+        - Uses most recent timestamps
+        
+        Args:
+            metadata_updates: Dict mapping IP to metadata updates
+                Format: {'1.2.3.4': {'reason': '...', 'first_seen': datetime, ...}}
+        """
+        if not metadata_updates:
+            return
+        
+        # Split by IP version
+        ipv4_updates = {}
+        ipv6_updates = {}
+        
+        for ip_str, metadata in metadata_updates.items():
+            ip_obj = metadata.get('ip')
+            if not ip_obj:
+                try:
+                    ip_obj = ipaddress.ip_address(ip_str)
+                except ValueError:
+                    self.logger.warning(f"Invalid IP in metadata update: {ip_str}")
+                    continue
+            
+            if ip_obj.version == 4:
+                ipv4_updates[ip_str] = metadata
+            else:
+                ipv6_updates[ip_str] = metadata
+        
+        # Update IPv4
+        if ipv4_updates:
+            self._bulk_update_file(self.config.blacklist_ipv4_file, ipv4_updates)
+        
+        # Update IPv6
+        if ipv6_updates:
+            self._bulk_update_file(self.config.blacklist_ipv6_file, ipv6_updates)
+        
+        self.logger.info(f"📝 Bulk updated {len(metadata_updates)} IPs with enriched metadata")
+    
+    def _bulk_update_file(self, filename: str, updates: Dict[str, Dict]):
+        """
+        Internal helper to merge metadata updates with existing blacklist file.
+        
+        Reads existing data, merges with updates, writes back.
+        """
+        existing = self.writer.read_blacklist(filename)
+        
+        for ip_str, new_metadata in updates.items():
+            if ip_str in existing:
+                # Merge with existing entry - preserve original data
+                existing_entry = existing[ip_str]
+                
+                # Update geolocation only if missing
+                if not existing_entry.get('geolocation') and new_metadata.get('geolocation'):
+                    existing_entry['geolocation'] = new_metadata['geolocation']
+                
+                # Use earliest first_seen
+                existing_first = existing_entry.get('first_seen')
+                new_first = new_metadata.get('first_seen')
+                if new_first and (not existing_first or new_first < existing_first):
+                    existing_entry['first_seen'] = new_first
+                
+                # Use most recent last_seen
+                existing_last = existing_entry.get('last_seen')
+                new_last = new_metadata.get('last_seen')
+                if new_last and (not existing_last or new_last > existing_last):
+                    existing_entry['last_seen'] = new_last
+                
+                # Increment event count
+                existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_metadata.get('event_count', 0)
+            else:
+                # New IP - add it
+                existing[ip_str] = new_metadata
+        
+        # Write back (use 0 for new_count since this is an update, not detection)
+        self.writer.write_blacklist(filename, existing, 0)
+    
     def get_all_blacklisted_ips(self) -> Dict[str, Set[ipaddress.IPv4Address | ipaddress.IPv6Address]]:
         """
         Retrieve all blocked IPs from all sources.
