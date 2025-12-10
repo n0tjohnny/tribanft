@@ -333,10 +333,16 @@ class BlacklistManager:
                 existing_entry = merged[ip_str]
                 
                 # Preserve original metadata (reason, confidence, source, first_seen, date_added)
-                # Only update last_seen timestamp
-                existing_entry['last_seen'] = new_info.get('last_seen', existing_entry.get('last_seen'))
+                # Update last_seen to most recent timestamp (use max to ensure forward progression)
+                new_last_seen = new_info.get('last_seen')
+                existing_last_seen = existing_entry.get('last_seen')
+                if new_last_seen and existing_last_seen:
+                    existing_entry['last_seen'] = max(new_last_seen, existing_last_seen)
+                elif new_last_seen:
+                    existing_entry['last_seen'] = new_last_seen
                 
-                # Increment event count (don't reset)
+                # Increment event count (accumulate total events seen)
+                # Note: This counts total detection events, not unique incidents
                 existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_info.get('event_count', 0)
                 
                 # Merge event_types (union of both sets)
@@ -354,12 +360,9 @@ class BlacklistManager:
         # Add manual IPs (they take precedence over automatic)
         for ip_str, manual_info in manual.items():
             if ip_str in merged:
-                # Manual entry exists - preserve manual metadata
-                merged[ip_str].update({
-                    'reason': manual_info['reason'],
-                    'source': 'manual',
-                    'confidence': 'manual'
-                })
+                # Manual entry exists - override with manual metadata completely
+                # This ensures manual entries always have consistent manual metadata
+                merged[ip_str] = manual_info
             else:
                 merged[ip_str] = manual_info
         
