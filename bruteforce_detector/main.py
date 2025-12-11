@@ -356,7 +356,7 @@ def main():
         engine.blacklist_manager.show_blacklist()
         sys.exit(0)
     elif args.show_manual:
-        manual_path = Path("/root/manual_blacklist.txt")
+        manual_path = Path(engine.config.manual_blacklist_file)
         if manual_path.exists():
             print("📋 MANUAL BLACKLIST")
             print("=" * 80)
