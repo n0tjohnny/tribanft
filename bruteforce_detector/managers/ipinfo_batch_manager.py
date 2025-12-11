@@ -295,8 +295,8 @@ class IPInfoBatchManager:
             if ips_to_update:
                 existing.update(ips_to_update)
                 self.blacklist_adapter.write_blacklist(str(blacklist_path), existing, len(ips_to_update))
-                self._save_results()
-                self._save_stats()
+                self._save_results_unlocked()
+                self._save_stats_unlocked()
             
             return len(ips_to_update)
     
@@ -312,33 +312,32 @@ class IPInfoBatchManager:
             'lon': loc[1] if len(loc) > 1 else None
         }
     
-    def _save_results(self):
-        """Save cache to JSON with file locking, atomic write, and retry logic."""
+    def _save_results_unlocked(self):
+        """Save cache to JSON with atomic write and retry logic (no locking)."""
         max_retries = 3
         retry_delay = 1.0
         
         for attempt in range(max_retries):
             try:
-                with self.file_lock("cache save"):
-                    # Define temp file path once
-                    temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
+                # Define temp file path once
+                temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
+                
+                try:
+                    # Atomic write pattern: write to temp file, then rename
+                    with open(temp_file, 'w', encoding='utf-8') as f:
+                        json.dump(self.cache, f, indent=2, ensure_ascii=False)
                     
-                    try:
-                        # Atomic write pattern: write to temp file, then rename
-                        with open(temp_file, 'w', encoding='utf-8') as f:
-                            json.dump(self.cache, f, indent=2, ensure_ascii=False)
-                        
-                        # Atomic rename
-                        temp_file.replace(self.results_file)
-                        return  # Success
-                        
-                    except Exception as e:
-                        self.logger.error(f"Save error: {e}")
-                        # Clean up temp file if it exists
-                        if temp_file.exists():
-                            temp_file.unlink()
-                        raise  # Re-raise to trigger retry
-                        
+                    # Atomic rename
+                    temp_file.replace(self.results_file)
+                    return  # Success
+                    
+                except Exception as e:
+                    self.logger.error(f"Save error: {e}")
+                    # Clean up temp file if it exists
+                    if temp_file.exists():
+                        temp_file.unlink()
+                    raise  # Re-raise to trigger retry
+                    
             except Exception as e:
                 if attempt < max_retries - 1:
                     self.logger.warning(
@@ -353,33 +352,37 @@ class IPInfoBatchManager:
                         "Service will continue but cache may not be persisted."
                     )
     
-    def _save_stats(self):
-        """Save statistics to file with file locking, atomic write, and retry logic."""
+    def _save_results(self):
+        """Save cache to JSON with file locking."""
+        with self.file_lock("cache save"):
+            self._save_results_unlocked()
+    
+    def _save_stats_unlocked(self):
+        """Save statistics to file with atomic write and retry logic (no locking)."""
         max_retries = 3
         retry_delay = 1.0
         
         for attempt in range(max_retries):
             try:
-                with self.file_lock("stats save"):
-                    # Define temp file path once
-                    temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
+                # Define temp file path once
+                temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
+                
+                try:
+                    # Atomic write pattern: write to temp file, then rename
+                    with open(temp_file, 'w') as f:
+                        json.dump(self.stats, f, indent=2)
                     
-                    try:
-                        # Atomic write pattern: write to temp file, then rename
-                        with open(temp_file, 'w') as f:
-                            json.dump(self.stats, f, indent=2)
-                        
-                        # Atomic rename
-                        temp_file.replace(self.stats_file)
-                        return  # Success
-                        
-                    except Exception as e:
-                        self.logger.error(f"Save stats error: {e}")
-                        # Clean up temp file if it exists
-                        if temp_file.exists():
-                            temp_file.unlink()
-                        raise  # Re-raise to trigger retry
-                        
+                    # Atomic rename
+                    temp_file.replace(self.stats_file)
+                    return  # Success
+                    
+                except Exception as e:
+                    self.logger.error(f"Save stats error: {e}")
+                    # Clean up temp file if it exists
+                    if temp_file.exists():
+                        temp_file.unlink()
+                    raise  # Re-raise to trigger retry
+                    
             except Exception as e:
                 if attempt < max_retries - 1:
                     self.logger.warning(
@@ -393,6 +396,11 @@ class IPInfoBatchManager:
                         f"❌ Stats save failed after {max_retries} attempts: {e}. "
                         "Service will continue but stats may not be persisted."
                     )
+    
+    def _save_stats(self):
+        """Save statistics with file locking."""
+        with self.file_lock("stats save"):
+            self._save_stats_unlocked()
     
     def get_stats_summary(self) -> Dict[str, Any]:
         """Get statistics summary."""
