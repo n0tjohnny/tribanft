@@ -22,6 +22,7 @@ sys.path.insert(0, '/root/bruteforce_detector')
 from bruteforce_detector.config import get_config
 from bruteforce_detector.managers.ipinfo_batch_manager import IPInfoBatchManager
 from bruteforce_detector.utils.logging import setup_logging
+from bruteforce_detector.utils.file_lock import FileLockError
 
 
 def run_batch_service(config, args):
@@ -48,18 +49,39 @@ def run_batch_service(config, args):
             logger.info(f"🔄 Iteração #{iteration} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info("="*70)
             
-            # Processa batch de IPs
-            processed = ipinfo_manager.process_blacklist_batch(
-                max_requests=args.batch_size
-            )
-            
-            # Exibe estatísticas
-            stats = ipinfo_manager.get_stats_summary()
-            logger.info(f"\n📊 Estatísticas:")
-            logger.info(f"   IPs processados nesta iteração: {processed}")
-            logger.info(f"   Requisições hoje: {stats['requests_today']}/{stats['daily_limit']}")
-            logger.info(f"   Disponíveis hoje: {stats['remaining_today']}")
-            logger.info(f"   Cache size: {stats['cache_size']} IPs")
+            try:
+                # Processa batch de IPs
+                processed = ipinfo_manager.process_blacklist_batch(
+                    max_requests=args.batch_size
+                )
+                
+                # Exibe estatísticas
+                stats = ipinfo_manager.get_stats_summary()
+                logger.info(f"\n📊 Estatísticas:")
+                logger.info(f"   IPs processados nesta iteração: {processed}")
+                logger.info(f"   Requisições hoje: {stats['requests_today']}/{stats['daily_limit']}")
+                logger.info(f"   Disponíveis hoje: {stats['remaining_today']}")
+                logger.info(f"   Cache size: {stats['cache_size']} IPs")
+                
+            except FileLockError as e:
+                logger.error(
+                    f"⚠️  File lock error in iteration {iteration}: {e}\n"
+                    f"   Lock file: {ipinfo_manager.lock_file}\n"
+                    "   This is non-critical - service will continue with next iteration"
+                )
+                # Log diagnostic info but don't crash
+                if ipinfo_manager.lock_file.exists():
+                    try:
+                        stat = ipinfo_manager.lock_file.stat()
+                        logger.info(
+                            f"   Lock file diagnostic:\n"
+                            f"     - Size: {stat.st_size} bytes\n"
+                            f"     - Age: {time.time() - stat.st_mtime:.1f}s"
+                        )
+                    except Exception:
+                        pass
+                processed = 0  # Mark as no processing done
+                stats = ipinfo_manager.get_stats_summary()  # Get stats even on error
             
             # Se não há mais IPs para processar ou limite diário atingido
             if processed == 0:

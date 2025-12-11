@@ -13,6 +13,7 @@ License: GNU GPL v3
 """
 
 import fcntl
+import os
 import time
 import logging
 from contextlib import contextmanager
@@ -58,7 +59,7 @@ def file_lock(lock_path: Path, timeout: int = 30, description: str = "operation"
     try:
         # Ensure lock file exists and parent directories are created
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_file = open(lock_path, 'w')
+        lock_file = open(lock_path, 'a+')
         
         # Try to acquire lock with exponential backoff
         start_time = time.time()
@@ -94,12 +95,14 @@ def file_lock(lock_path: Path, timeout: int = 30, description: str = "operation"
                 time.sleep(min(retry_delay, 2.0))
                 retry_delay *= 1.5
         
-        # Lock acquired, write PID for debugging
+        # Lock acquired, write PID and timestamp for debugging
         try:
-            lock_file.write(f"{time.time()}\n")
+            lock_file.seek(0)
+            lock_file.truncate()
+            lock_file.write(f"{os.getpid()}:{time.time()}\n")
             lock_file.flush()
-        except Exception:
-            pass  # Non-critical
+        except Exception as e:
+            logger.warning(f"Non-critical: failed to write lock metadata: {e}")
         
         # Yield control to context manager body
         yield
@@ -118,6 +121,73 @@ def file_lock(lock_path: Path, timeout: int = 30, description: str = "operation"
                 lock_file.close()
             except Exception as e:
                 logger.warning(f"Error closing lock file: {e}")
+
+
+def cleanup_stale_lock(lock_path: Path, max_age_seconds: int = 300) -> bool:
+    """
+    Detect and clean up stale lock files.
+    
+    A lock is considered stale if:
+    - Lock file is older than max_age_seconds (default: 5 minutes)
+    - PID in lock file is not running (if available)
+    
+    Args:
+        lock_path: Path to lock file
+        max_age_seconds: Maximum age before lock is considered stale (default: 300 = 5 minutes)
+        
+    Returns:
+        True if lock was cleaned up, False otherwise
+        
+    Example:
+        >>> lock_file = Path("/var/lib/tribanft/.ipinfo.lock")
+        >>> if cleanup_stale_lock(lock_file):
+        ...     logger.info("Cleaned up stale lock file")
+    """
+    logger = logging.getLogger(__name__)
+    
+    if not lock_path.exists():
+        return False
+    
+    try:
+        # Check file age
+        file_stat = lock_path.stat()
+        file_age = time.time() - file_stat.st_mtime
+        
+        if file_age < max_age_seconds:
+            logger.debug(f"Lock file age ({file_age:.1f}s) is within threshold ({max_age_seconds}s)")
+            return False
+        
+        # Try to extract PID from lock file
+        try:
+            with open(lock_path, 'r') as f:
+                content = f.read().strip()
+                if ':' in content:
+                    pid_str = content.split(':')[0]
+                    pid = int(pid_str)
+                    
+                    # Check if process is still running
+                    try:
+                        os.kill(pid, 0)  # Signal 0 doesn't kill, just checks existence
+                        logger.debug(f"Process {pid} from lock file is still running")
+                        return False
+                    except OSError:
+                        # Process doesn't exist
+                        logger.info(f"Lock file references dead process {pid}")
+        except (ValueError, IndexError, FileNotFoundError):
+            # Can't extract PID or file disappeared
+            pass
+        
+        # Lock is stale - remove it
+        logger.warning(
+            f"🧹 Removing stale lock file (age: {file_age:.1f}s, "
+            f"threshold: {max_age_seconds}s): {lock_path}"
+        )
+        lock_path.unlink()
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error checking/cleaning stale lock: {e}")
+        return False
 
 
 class FileLockContext:

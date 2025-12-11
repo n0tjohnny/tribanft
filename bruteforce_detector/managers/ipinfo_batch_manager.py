@@ -29,7 +29,7 @@ import ipaddress
 import requests
 
 from bruteforce_detector.managers.blacklist_adapter import BlacklistAdapter
-from bruteforce_detector.utils.file_lock import FileLockContext
+from bruteforce_detector.utils.file_lock import FileLockContext, cleanup_stale_lock
 
 
 class IPInfoBatchManager:
@@ -56,7 +56,12 @@ class IPInfoBatchManager:
         
         # File locking for concurrent operation safety
         self.lock_file = self.cache_dir / ".ipinfo.lock"
-        self.file_lock = FileLockContext(self.lock_file, timeout=30)
+        
+        # Clean up stale locks on startup
+        if cleanup_stale_lock(self.lock_file, max_age_seconds=300):
+            self.logger.info("🧹 Cleaned up stale lock file on startup")
+        
+        self.file_lock = FileLockContext(self.lock_file, timeout=60)
         
         # Auto-load caches
         self.cache = self._load_all_caches()
@@ -308,44 +313,86 @@ class IPInfoBatchManager:
         }
     
     def _save_results(self):
-        """Save cache to JSON with file locking and atomic write."""
-        with self.file_lock("cache save"):
-            # Define temp file path once
-            temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
-            
+        """Save cache to JSON with file locking, atomic write, and retry logic."""
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
             try:
-                # Atomic write pattern: write to temp file, then rename
-                with open(temp_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.cache, f, indent=2, ensure_ascii=False)
-                
-                # Atomic rename
-                temp_file.replace(self.results_file)
-                
+                with self.file_lock("cache save", timeout=60):
+                    # Define temp file path once
+                    temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
+                    
+                    try:
+                        # Atomic write pattern: write to temp file, then rename
+                        with open(temp_file, 'w', encoding='utf-8') as f:
+                            json.dump(self.cache, f, indent=2, ensure_ascii=False)
+                        
+                        # Atomic rename
+                        temp_file.replace(self.results_file)
+                        return  # Success
+                        
+                    except Exception as e:
+                        self.logger.error(f"Save error: {e}")
+                        # Clean up temp file if it exists
+                        if temp_file.exists():
+                            temp_file.unlink()
+                        raise  # Re-raise to trigger retry
+                        
             except Exception as e:
-                self.logger.error(f"Save error: {e}")
-                # Clean up temp file if it exists
-                if temp_file.exists():
-                    temp_file.unlink()
+                if attempt < max_retries - 1:
+                    self.logger.warning(
+                        f"⚠️  Cache save failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {retry_delay}s..."
+                    )
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    self.logger.error(
+                        f"❌ Cache save failed after {max_retries} attempts: {e}. "
+                        "Service will continue but cache may not be persisted."
+                    )
     
     def _save_stats(self):
-        """Save statistics to file with file locking and atomic write."""
-        with self.file_lock("stats save"):
-            # Define temp file path once
-            temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
-            
+        """Save statistics to file with file locking, atomic write, and retry logic."""
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
             try:
-                # Atomic write pattern: write to temp file, then rename
-                with open(temp_file, 'w') as f:
-                    json.dump(self.stats, f, indent=2)
-                
-                # Atomic rename
-                temp_file.replace(self.stats_file)
-                
+                with self.file_lock("stats save", timeout=60):
+                    # Define temp file path once
+                    temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
+                    
+                    try:
+                        # Atomic write pattern: write to temp file, then rename
+                        with open(temp_file, 'w') as f:
+                            json.dump(self.stats, f, indent=2)
+                        
+                        # Atomic rename
+                        temp_file.replace(self.stats_file)
+                        return  # Success
+                        
+                    except Exception as e:
+                        self.logger.error(f"Save stats error: {e}")
+                        # Clean up temp file if it exists
+                        if temp_file.exists():
+                            temp_file.unlink()
+                        raise  # Re-raise to trigger retry
+                        
             except Exception as e:
-                self.logger.error(f"Save stats error: {e}")
-                # Clean up temp file if it exists
-                if temp_file.exists():
-                    temp_file.unlink()
+                if attempt < max_retries - 1:
+                    self.logger.warning(
+                        f"⚠️  Stats save failed (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {retry_delay}s..."
+                    )
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    self.logger.error(
+                        f"❌ Stats save failed after {max_retries} attempts: {e}. "
+                        "Service will continue but stats may not be persisted."
+                    )
     
     def get_stats_summary(self) -> Dict[str, Any]:
         """Get statistics summary."""
