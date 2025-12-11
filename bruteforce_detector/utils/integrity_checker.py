@@ -20,6 +20,7 @@ import hashlib
 import ipaddress
 import json
 import sqlite3
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Set
 from datetime import datetime
@@ -429,7 +430,3 @@ class IntegrityChecker:
             results.append(self.verify_database_schema(config.database_path))
         
         return results
-
-
-# Import os for access check
-import os
