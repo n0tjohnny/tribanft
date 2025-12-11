@@ -179,7 +179,7 @@ class IPInfoBatchManager:
         
         return True
     
-    def get_ip_info(self, ip_str: str, use_cache: bool = True) -> Optional[Dict]:
+    def get_ip_info(self, ip_str: str, use_cache: bool = True, auto_save: bool = True) -> Optional[Dict]:
         """Get IP info with cache priority."""
         if use_cache and ip_str in self.cache:
             self.stats['cache_hits'] = self.stats.get('cache_hits', 0) + 1
@@ -206,7 +206,7 @@ class IPInfoBatchManager:
                 self.stats['api_calls'] = self.stats.get('api_calls', 0) + 1
                 self.stats['requests_today'] = self.requests_today
                 
-                if self.stats['api_calls'] % 10 == 0:
+                if auto_save and self.stats['api_calls'] % 10 == 0:
                     self._save_results()
                     self._save_stats()
                 
@@ -276,7 +276,7 @@ class IPInfoBatchManager:
                     if not self._check_rate_limits():
                         continue
                     
-                    full_data = self.get_ip_info(ip_str, use_cache=False)
+                    full_data = self.get_ip_info(ip_str, use_cache=False, auto_save=False)
                     if full_data:
                         normalized = self._normalize_ipinfo_response(full_data)
                         ips_to_update[ip_str] = {
