@@ -39,40 +39,117 @@ Automated brute force detection and IP blocking for Linux servers, protecting ag
 
 ## Installation
 
-### Quick Start
+### Quick Start (Non-Root User)
+
+The system now uses XDG Base Directory specification, allowing non-root installation:
 
 ```bash
 # Clone repository
 git clone https://github.com/n0tjohnny/tribanft.git
 cd tribanft
 
-# Install package
+# Install package (creates ~/.local/share/tribanft, ~/.local/state/tribanft automatically)
 pip install -e .
 
-# Create directories
-mkdir -p /var/lib/tribanft /etc/tribanft
-touch /root/blacklist_ipv4.txt /root/whitelist_ips.txt
+# Verify directories created
+python3 -c "from bruteforce_detector.config import get_config; c = get_config(); print(f'Data: {c.data_dir}\nState: {c.state_dir}')"
 
 # Set up hourly detection (crontab)
-(crontab -l 2>/dev/null; echo "10 * * * * /usr/local/bin/tribanft --detect >> /var/log/tribanft.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "10 * * * * $HOME/.local/bin/tribanft --detect") | crontab -
+```
+
+### Traditional System-Wide Installation (Root)
+
+For system-wide deployment with legacy paths:
+
+```bash
+# Install as root
+sudo pip install -e .
+
+# Use environment variables to specify system paths
+export TRIBANFT_DATA_DIR=/var/lib/tribanft/data
+export TRIBANFT_STATE_DIR=/var/lib/tribanft/state
+
+# Or keep legacy paths (with deprecation warnings)
+export TRIBANFT_DATA_DIR=/root
+export TRIBANFT_STATE_DIR=/var/lib/tribanft
+
+# Create directories
+mkdir -p $TRIBANFT_DATA_DIR $TRIBANFT_STATE_DIR
+
+# Set up cron
+(crontab -l 2>/dev/null; echo "10 * * * * /usr/local/bin/tribanft --detect") | crontab -
+```
+
+### Custom Installation Path
+
+```bash
+# Set custom directories
+export TRIBANFT_DATA_DIR=/opt/tribanft/data
+export TRIBANFT_CONFIG_DIR=/opt/tribanft/config
+export TRIBANFT_STATE_DIR=/opt/tribanft/state
+
+# Install and run
+pip install -e .
+tribanft --detect
 ```
 
 ### Optional - Geolocation Service
 
 ```bash
-# Store IPInfo.io token
-echo "YOUR_IPINFO_TOKEN" > /etc/tribanft/ipinfo_token.txt
-chmod 600 /etc/tribanft/ipinfo_token.txt
+# Store IPInfo.io token in config directory
+CONFIG_DIR=$(python3 -c "from bruteforce_detector.config import get_config; print(get_config().config_dir)")
+echo "YOUR_IPINFO_TOKEN" > "$CONFIG_DIR/ipinfo_token.txt"
+chmod 600 "$CONFIG_DIR/ipinfo_token.txt"
 
 # Install systemd service
 sudo ./install-ipinfo-batch-service.sh
 ```
 
+### Migrating from Legacy Paths
+
+See [UPGRADE.md](UPGRADE.md) for detailed migration instructions from `/root/` paths to XDG-compliant paths.
+
 ---
 
 ## Configuration
 
-Create `/etc/tribanft/.env`:
+### Directory Structure
+
+**Default (XDG):**
+```
+~/.config/tribanft/          # Configuration files
+~/.local/share/tribanft/     # Blacklist/whitelist data files
+~/.local/state/tribanft/     # Runtime state, database, backups
+  ├── backups/               # Rotating backup files
+  ├── blacklist.db           # SQLite database (if enabled)
+  ├── state.json             # Detection state
+  └── tribanft.log           # Application logs
+```
+
+### Environment Variables
+
+**Path Configuration:**
+```bash
+TRIBANFT_DATA_DIR         # Override data directory
+TRIBANFT_CONFIG_DIR       # Override config directory  
+TRIBANFT_STATE_DIR        # Override state directory
+
+# Or use XDG variables
+XDG_DATA_HOME             # Base for data directory
+XDG_CONFIG_HOME           # Base for config directory
+XDG_STATE_HOME            # Base for state directory
+```
+
+**Backup Configuration:**
+```bash
+BFD_BACKUP_RETENTION_DAYS=7   # Days to keep backups
+BFD_BACKUP_MIN_KEEP=5         # Minimum backups to keep
+```
+
+### Configuration File
+
+Create `$XDG_CONFIG_HOME/tribanft/.env` or `/etc/tribanft/.env`:
 
 ```bash
 # Detection thresholds (events within time window)
@@ -109,11 +186,29 @@ An IP is blacklisted when it triggers N events within the configured time window
 | `tribanft --blacklist-search <ip>` | Search logs for IP activity |
 | `tribanft --verbose` | Enable debug output |
 
+### Integrity & Backup Commands (New)
+
+| Command | Purpose |
+|---------|---------|
+| `tribanft --verify` | Run integrity checks on blacklist files and database |
+| `tribanft --list-backups <file>` | List available backups for a file |
+| `tribanft --restore-backup <path> --restore-target <path>` | Restore from specific backup |
+| `tribanft --detect --skip-verify` | Skip automatic verification on startup |
+
 ### Examples
 
 ```bash
 # Run detection
 tribanft --detect
+
+# Run detection with integrity check
+tribanft --detect  # Automatic check on startup
+
+# Skip startup verification (faster, for emergencies)
+tribanft --detect --skip-verify
+
+# Run full integrity verification
+tribanft --verify
 
 # Manually block an IP
 tribanft --blacklist-add 1.2.3.4 --blacklist-reason "Confirmed attacker"
@@ -126,7 +221,36 @@ tribanft --whitelist-add 192.168.1.100
 
 # View current blacklist
 tribanft --show-blacklist
+
+# List available backups for blacklist file
+tribanft --list-backups blacklist_ipv4.txt
+
+# Restore from a specific backup
+tribanft --restore-backup ~/.local/state/tribanft/backups/blacklist_ipv4.txt_20231211_143052.backup \
+         --restore-target ~/.local/share/tribanft/blacklist_ipv4.txt
 ```
+
+### Backup & Recovery
+
+**Automatic Backups:**
+- Created before every file modification
+- Stored in `$STATE_DIR/backups/`
+- Format: `{filename}_YYYYMMDD_HHMMSS.backup`
+- Retention: 7 days (configurable)
+- Minimum kept: 5 backups (configurable)
+
+**Manual Recovery:**
+```bash
+# Check integrity
+tribanft --verify
+
+# List available backups
+tribanft --list-backups blacklist_ipv4.txt
+
+# Restore from backup
+tribanft --restore-backup <backup-path> --restore-target <target-path>
+```
+
 
 ---
 
@@ -217,7 +341,9 @@ python3 migrate_to_sqlite.py --stats
 
 3. **Review recent events**
    ```bash
-   tail -f /var/log/tribanft.log
+   # Log location depends on configuration
+   STATE_DIR=$(python3 -c "from bruteforce_detector.config import get_config; print(get_config().state_dir)")
+   tail -f "$STATE_DIR/tribanft.log"
    ```
 
 ### NFTables Sync Fails
@@ -237,7 +363,8 @@ python3 migrate_to_sqlite.py --stats
 
 1. **Verify token file**
    ```bash
-   cat /etc/tribanft/ipinfo_token.txt
+   CONFIG_DIR=$(python3 -c "from bruteforce_detector.config import get_config; print(get_config().config_dir)")
+   cat "$CONFIG_DIR/ipinfo_token.txt"
    ```
 
 2. **Check service status**
@@ -245,6 +372,77 @@ python3 migrate_to_sqlite.py --stats
    systemctl status tribanft-ipinfo-batch
    journalctl -u tribanft-ipinfo-batch -f
    ```
+
+### File Corruption / Data Loss
+
+1. **Run integrity check**
+   ```bash
+   tribanft --verify
+   ```
+
+2. **Check available backups**
+   ```bash
+   tribanft --list-backups blacklist_ipv4.txt
+   ```
+
+3. **Restore from backup**
+   ```bash
+   # List backups with full paths
+   ls -lah ~/.local/state/tribanft/backups/
+   
+   # Restore specific backup
+   tribanft --restore-backup <backup-path> --restore-target <target-path>
+   ```
+
+4. **Check disk space**
+   ```bash
+   df -h ~/.local/state/tribanft
+   ```
+
+### Permission Errors
+
+1. **Check directory ownership**
+   ```bash
+   ls -la ~/.local/share/tribanft
+   ls -la ~/.local/state/tribanft
+   ```
+
+2. **Fix permissions (if needed)**
+   ```bash
+   chmod -R 755 ~/.local/share/tribanft
+   chmod -R 755 ~/.local/state/tribanft
+   ```
+
+3. **For system-wide installation**
+   ```bash
+   sudo chown -R tribanft:tribanft /var/lib/tribanft
+   sudo chmod -R 755 /var/lib/tribanft
+   ```
+
+### Path Configuration Issues
+
+1. **Verify current paths**
+   ```bash
+   python3 -c "
+from bruteforce_detector.config import get_config
+c = get_config()
+print(f'Data dir: {c.data_dir}')
+print(f'Config dir: {c.config_dir}')
+print(f'State dir: {c.state_dir}')
+print(f'Blacklist IPv4: {c.blacklist_ipv4_file}')
+print(f'Database: {c.database_path}')
+   "
+   ```
+
+2. **Override paths via environment**
+   ```bash
+   export TRIBANFT_DATA_DIR=/custom/path/data
+   export TRIBANFT_STATE_DIR=/custom/path/state
+   tribanft --detect
+   ```
+
+3. **Migration issues**
+   See [UPGRADE.md](UPGRADE.md) for detailed migration guide
 
 ---
 

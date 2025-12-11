@@ -7,13 +7,17 @@ Persists run history to enable incremental log processing - only parse
 logs since last successful run. Stores timestamps and file positions
 to avoid reprocessing the same events.
 
-State file location: /var/lib/tribanft/state.json
+Uses atomic writes (write-to-temp-then-rename) to prevent corruption.
+
+State file location: Configured via config.state_file (default: XDG state dir)
 
 Author: TribanFT Project
 License: GNU GPL v3
 """
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 import logging
@@ -56,6 +60,8 @@ class StateManager:
         
         Called after successful detection cycle to mark this run's completion.
         Next run will only process events newer than this timestamp.
+        
+        Uses atomic write (temp file + rename) to prevent corruption.
         """
         state = ProcessingState()
         state.last_processed_timestamp = datetime.now()
@@ -64,7 +70,26 @@ class StateManager:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         
         try:
-            with open(self.state_file, 'w') as f:
-                json.dump(state.to_dict(), f, indent=2)
+            # ATOMIC WRITE: Write to temp file first, then rename
+            fd, temp_path = tempfile.mkstemp(
+                dir=self.state_file.parent,
+                prefix=f".{self.state_file.name}.",
+                suffix='.tmp'
+            )
+            
+            try:
+                # Write state to temp file
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(state.to_dict(), f, indent=2)
+                
+                # Atomic rename
+                os.replace(temp_path, self.state_file)
+                
+            except Exception as e:
+                # Clean up temp file on error
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                raise
+                
         except Exception as e:
             self.logger.error(f"Failed to save state: {e}")

@@ -24,6 +24,8 @@ import logging
 import ipaddress
 import re
 import fcntl
+import os
+import tempfile
 from contextlib import contextmanager
 
 
@@ -39,6 +41,14 @@ class BlacklistWriter:
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
+        
+        # Initialize backup manager for rotating backups
+        try:
+            from ..utils.backup_manager import get_backup_manager
+            self.backup_manager = get_backup_manager()
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize backup manager: {e}")
+            self.backup_manager = None
     
     @contextmanager
     def _file_lock(self, filepath: Path):
@@ -278,16 +288,25 @@ class BlacklistWriter:
         
         # FILE LOCKING: Previne escrita concorrente
         with self._file_lock(path):
-            # Automatic backup
+            # Automatic backup using BackupManager
             if path.exists():
-                backup_path = Path(str(path) + f".backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-                try:
-                    import shutil
-                    shutil.copy2(path, backup_path)
-                    self.logger.info(f"💾 Backup: {backup_path.name}")
-                    self._cleanup_old_backups(path, keep=5)
-                except Exception as e:
-                    self.logger.warning(f"Backup failed: {e}")
+                if self.backup_manager:
+                    try:
+                        self.backup_manager.create_backup(str(path))
+                        # Prune old backups according to retention policy
+                        self.backup_manager.prune_old_backups()
+                    except Exception as e:
+                        self.logger.warning(f"Backup manager failed: {e}")
+                else:
+                    # Fallback to old backup method
+                    backup_path = Path(str(path) + f".backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                    try:
+                        import shutil
+                        shutil.copy2(path, backup_path)
+                        self.logger.info(f"💾 Backup: {backup_path.name}")
+                        self._cleanup_old_backups(path, keep=5)
+                    except Exception as e:
+                        self.logger.warning(f"Backup failed: {e}")
             
             # Calculate statistics
             total_ips = len(ips_info)
@@ -296,30 +315,53 @@ class BlacklistWriter:
             total_events = sum(info.get('event_count', 0) for info in ips_info.values())
             with_geo = sum(1 for info in ips_info.values() if info.get('geolocation'))
             
-            # Write file with header
-            with open(path, 'w') as f:
-                f.write(f"# {'='*118}\n")
-                f.write(f"# ENHANCED BLACKLIST - COMPREHENSIVE THREAT INTELLIGENCE\n")
-                f.write(f"# {'='*118}\n")
-                f.write(f"# Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n#\n")
-                f.write(f"# STATISTICS:\n")
-                f.write(f"#   Total IPs: {total_ips} (New: {new_count})\n")
-                f.write(f"#   High Confidence: {high_conf} | Medium: {medium_conf}\n")
-                f.write(f"#   Total Events: {total_events}\n")
-                f.write(f"#   With Geolocation: {with_geo} ({with_geo/total_ips*100:.1f}%)\n")
-                f.write(f"# {'='*118}\n\n")
+            # ATOMIC WRITE: Write to temp file first, then rename
+            try:
+                # Create temp file in same directory as target (ensures same filesystem)
+                fd, temp_path = tempfile.mkstemp(
+                    dir=path.parent,
+                    prefix=f".{path.name}.",
+                    suffix='.tmp'
+                )
                 
-                # Group by source
-                by_source = self._group_by_source(ips_info)
-                
-                for source, ips in by_source.items():
-                    if ips:
-                        f.write(f"\n# {'-'*118}\n")
-                        f.write(f"# SOURCE: {source.upper()} ({len(ips)} IPs)\n")
-                        f.write(f"# {'-'*118}\n\n")
+                try:
+                    # Write to temp file
+                    with os.fdopen(fd, 'w') as f:
+                        f.write(f"# {'='*118}\n")
+                        f.write(f"# ENHANCED BLACKLIST - COMPREHENSIVE THREAT INTELLIGENCE\n")
+                        f.write(f"# {'='*118}\n")
+                        f.write(f"# Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n#\n")
+                        f.write(f"# STATISTICS:\n")
+                        f.write(f"#   Total IPs: {total_ips} (New: {new_count})\n")
+                        f.write(f"#   High Confidence: {high_conf} | Medium: {medium_conf}\n")
+                        f.write(f"#   Total Events: {total_events}\n")
+                        f.write(f"#   With Geolocation: {with_geo} ({with_geo/total_ips*100:.1f}%)\n")
+                        f.write(f"# {'='*118}\n\n")
                         
-                        for ip_str in sorted(ips.keys(), key=lambda x: ipaddress.ip_address(x)):
-                            self._write_ip_entry(f, ip_str, ips[ip_str])
+                        # Group by source
+                        by_source = self._group_by_source(ips_info)
+                        
+                        for source, ips in by_source.items():
+                            if ips:
+                                f.write(f"\n# {'-'*118}\n")
+                                f.write(f"# SOURCE: {source.upper()} ({len(ips)} IPs)\n")
+                                f.write(f"# {'-'*118}\n\n")
+                                
+                                for ip_str in sorted(ips.keys(), key=lambda x: ipaddress.ip_address(x)):
+                                    self._write_ip_entry(f, ip_str, ips[ip_str])
+                    
+                    # Atomic rename: replaces old file with new one
+                    os.replace(temp_path, path)
+                    
+                except Exception as e:
+                    # Clean up temp file on error
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                    raise
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to write {path}: {e}")
+                raise
         
         # Log após liberar o lock
         if new_count > 0:

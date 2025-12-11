@@ -312,13 +312,117 @@ def main():
     parser.add_argument('--sync-stats', action='store_true', help='Show database statistics with sync')
     parser.add_argument('--stats-only', action='store_true', help='Show database statistics without syncing')
     
+    # Integrity and backup management commands
+    parser.add_argument('--verify', action='store_true', help='Run integrity checks on blacklist files and database')
+    parser.add_argument('--skip-verify', action='store_true', help='Skip automatic integrity verification on startup')
+    parser.add_argument('--list-backups', type=str, metavar='FILE', help='List available backups for a file (e.g., blacklist_ipv4.txt)')
+    parser.add_argument('--restore-backup', type=str, metavar='BACKUP_PATH', help='Restore from a specific backup file')
+    parser.add_argument('--restore-target', type=str, metavar='TARGET_PATH', help='Target path for backup restoration (required with --restore-backup)')
+    
     args = parser.parse_args()
     
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     setup_logging(level=log_level)
     
+    # Handle integrity and backup commands first (don't need full engine)
+    if args.verify:
+        from bruteforce_detector.utils.integrity_checker import IntegrityChecker
+        from bruteforce_detector.config import get_config
+        
+        config = get_config()
+        checker = IntegrityChecker()
+        
+        print("🔍 Running Integrity Checks...")
+        print("=" * 80)
+        
+        results = checker.verify_all(config)
+        
+        for result in results:
+            print(result)
+            print()
+        
+        # Overall summary
+        passed = sum(1 for r in results if r.passed)
+        failed = len(results) - passed
+        
+        print("=" * 80)
+        print(f"Summary: {passed} passed, {failed} failed")
+        
+        sys.exit(0 if failed == 0 else 1)
+    
+    elif args.list_backups:
+        from bruteforce_detector.utils.backup_manager import get_backup_manager
+        from bruteforce_detector.config import get_config
+        
+        config = get_config()
+        backup_mgr = get_backup_manager()
+        
+        filename = args.list_backups
+        backups = backup_mgr.list_backups(filename)
+        
+        if not backups:
+            print(f"📋 No backups found for {filename}")
+            sys.exit(0)
+        
+        print(f"📋 Available Backups for {filename}")
+        print("=" * 80)
+        
+        for timestamp, backup_path in backups:
+            size = backup_path.stat().st_size
+            size_kb = size / 1024
+            print(f"  {timestamp.strftime('%Y-%m-%d %H:%M:%S')} - {backup_path.name} ({size_kb:.1f} KB)")
+        
+        print(f"\nTotal: {len(backups)} backups")
+        sys.exit(0)
+    
+    elif args.restore_backup:
+        if not args.restore_target:
+            print("❌ Error: --restore-target is required with --restore-backup")
+            sys.exit(1)
+        
+        from bruteforce_detector.utils.backup_manager import get_backup_manager
+        
+        backup_mgr = get_backup_manager()
+        backup_path = Path(args.restore_backup)
+        target_path = Path(args.restore_target)
+        
+        print(f"🔄 Restoring from backup...")
+        print(f"   Backup: {backup_path}")
+        print(f"   Target: {target_path}")
+        
+        success = backup_mgr.restore_backup(backup_path, target_path)
+        
+        if success:
+            print(f"✅ Restoration completed successfully")
+            sys.exit(0)
+        else:
+            print(f"❌ Restoration failed")
+            sys.exit(1)
+    
     engine = BruteForceDetectorEngine()
+    
+    # Run automatic integrity check on startup (unless skipped)
+    if not args.skip_verify and args.detect:
+        from bruteforce_detector.utils.integrity_checker import IntegrityChecker
+        
+        logger = logging.getLogger(__name__)
+        checker = IntegrityChecker()
+        config = engine.config
+        
+        logger.info("🔍 Running startup integrity checks...")
+        
+        # Quick check on main blacklist file
+        if Path(config.blacklist_ipv4_file).exists():
+            result = checker.verify_blacklist_file(config.blacklist_ipv4_file)
+            if not result.passed:
+                logger.warning("⚠️  Integrity check found issues:")
+                for error in result.errors[:3]:
+                    logger.warning(f"   • {error}")
+                logger.warning("   Use --verify for full report")
+        
+        logger.info("✅ Startup checks complete")
+    
     
     if args.whitelist_add:
         success = engine.whitelist_manager.add_to_whitelist(args.whitelist_add)
