@@ -54,7 +54,7 @@ class BlacklistAdapter:
         self.file_writer = BlacklistWriter(config)
         
         if use_database:
-            self.db = BlacklistDatabase()
+            self.db = BlacklistDatabase(config.database_path)
             self.logger.info("📊 Using SQLite backend for blacklist")
             if getattr(config, 'sync_to_file', True):
                 self.logger.info("📄 File sync ENABLED (database ↔ file)")

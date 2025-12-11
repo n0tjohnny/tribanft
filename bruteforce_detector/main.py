@@ -493,7 +493,7 @@ def main():
             from bruteforce_detector.managers.database import BlacklistDatabase
             from bruteforce_detector.managers.blacklist_adapter import BlacklistAdapter
             
-            db = BlacklistDatabase()
+            db = BlacklistDatabase(engine.config.database_path)
             adapter = BlacklistAdapter(engine.config, use_database=True)
             
             # Show stats before sync if requested
