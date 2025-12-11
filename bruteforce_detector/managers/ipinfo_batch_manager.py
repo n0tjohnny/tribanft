@@ -45,8 +45,8 @@ class IPInfoBatchManager:
         self.base_url = "https://ipinfo.io"
         
         # Rate limits
-        self.daily_limit = 1000
-        self.rate_limit_per_minute = 15
+        self.daily_limit = 1600
+        self.rate_limit_per_minute = 100
         
         # Paths
         self.cache_dir = Path("/var/lib/tribanft/ipinfo_cache")

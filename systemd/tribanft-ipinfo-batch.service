@@ -10,7 +10,7 @@ User=root
 Group=root
 
 # Script path
-ExecStart=/usr/bin/python3 /root/tribanft/tools/tribanft-ipinfo-batch.py --daemon --token 2110c05503129a --interval 3600 --batch-size 100
+ExecStart=/usr/bin/python3 /root/tribanft/tools/tribanft-ipinfo-batch.py --daemon
 
 # Auto-restart on failure
 Restart=on-failure
