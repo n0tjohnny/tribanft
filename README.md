@@ -103,7 +103,7 @@ echo "YOUR_IPINFO_TOKEN" > "$CONFIG_DIR/ipinfo_token.txt"
 chmod 600 "$CONFIG_DIR/ipinfo_token.txt"
 
 # Install systemd service
-sudo ./install-ipinfo-batch-service.sh
+sudo ./scripts/install-ipinfo-batch-service.sh
 ```
 
 ### Migrating from Legacy Paths
@@ -310,10 +310,10 @@ Each detector analyzes events within the configured time window and triggers blo
 BFD_USE_DATABASE=true
 
 # Migrate existing data
-python3 migrate_to_sqlite.py --migrate
+python3 scripts/maintenance/migrate_to_sqlite.py --migrate
 
 # View statistics
-python3 migrate_to_sqlite.py --stats
+python3 scripts/maintenance/migrate_to_sqlite.py --stats
 ```
 
 **Benefits:**

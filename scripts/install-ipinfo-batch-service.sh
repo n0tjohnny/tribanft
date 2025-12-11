@@ -26,8 +26,8 @@ fi
 
 # Variáveis
 PROJECT_DIR="/root/bruteforce_detector"
-SERVICE_FILE="tribanft-ipinfo-batch.service"
-SCRIPT_FILE="tribanft-ipinfo-batch.py"
+SERVICE_FILE="systemd/tribanft-ipinfo-batch.service"
+SCRIPT_FILE="tools/tribanft-ipinfo-batch.py"
 CONFIG_DIR="/etc/tribanft"
 TOKEN_FILE="${CONFIG_DIR}/ipinfo_token.txt"
 CACHE_DIR="/var/lib/tribanft/ipinfo_cache"

@@ -10,7 +10,7 @@ User=root
 Group=root
 
 # Caminho do script
-ExecStart=/usr/bin/python3 /root/bruteforce_detector/tribanft-ipinfo-batch.py --daemon --interval 3600 --batch-size 100
+ExecStart=/usr/bin/python3 /root/bruteforce_detector/tools/tribanft-ipinfo-batch.py --daemon --interval 3600 --batch-size 100
 
 # Restart automaticamente em caso de falha
 Restart=on-failure
