@@ -180,7 +180,18 @@ class IPInfoBatchManager:
         return True
     
     def get_ip_info(self, ip_str: str, use_cache: bool = True, auto_save: bool = True) -> Optional[Dict]:
-        """Get IP info with cache priority."""
+        """
+        Get IP info with cache priority.
+        
+        Args:
+            ip_str: IP address string to look up
+            use_cache: Whether to check cache before making API call (default: True)
+            auto_save: Whether to automatically save cache/stats every 10 API calls (default: True).
+                      Set to False when calling from within a locked context to avoid nested locking.
+        
+        Returns:
+            Dictionary with IP information or None if lookup fails
+        """
         if use_cache and ip_str in self.cache:
             self.stats['cache_hits'] = self.stats.get('cache_hits', 0) + 1
             return self.cache[ip_str]
@@ -313,7 +324,13 @@ class IPInfoBatchManager:
         }
     
     def _save_results_unlocked(self):
-        """Save cache to JSON with atomic write and retry logic (no locking)."""
+        """
+        Save cache to JSON with atomic write and retry logic (no locking).
+        
+        WARNING: This method does NOT acquire file locks. The caller must ensure
+        proper locking is in place to prevent race conditions. Use _save_results()
+        for lock-protected saves.
+        """
         max_retries = 3
         retry_delay = 1.0
         
@@ -358,7 +375,13 @@ class IPInfoBatchManager:
             self._save_results_unlocked()
     
     def _save_stats_unlocked(self):
-        """Save statistics to file with atomic write and retry logic (no locking)."""
+        """
+        Save statistics to file with atomic write and retry logic (no locking).
+        
+        WARNING: This method does NOT acquire file locks. The caller must ensure
+        proper locking is in place to prevent race conditions. Use _save_stats()
+        for lock-protected saves.
+        """
         max_retries = 3
         retry_delay = 1.0
         
