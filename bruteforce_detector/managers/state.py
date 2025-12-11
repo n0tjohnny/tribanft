@@ -83,7 +83,11 @@ class StateManager:
                     json.dump(state.to_dict(), f, indent=2)
                 
                 # Atomic rename
-                os.replace(temp_path, self.state_file)
+                try:
+                    os.replace(temp_path, self.state_file)
+                except OSError as e:
+                    self.logger.error(f"Failed to rename temp file to {self.state_file}: {e}")
+                    raise
                 
             except Exception as e:
                 # Clean up temp file on error

@@ -49,7 +49,8 @@ def setup_logging(level=logging.INFO):
         config = get_config()
         log_file = Path(config.state_dir) / 'tribanft.log'
         log_file.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
+    except (ImportError, AttributeError, PermissionError) as e:
+        # Config not available or permission denied
         pass
     
     # Fallback: try /var/log

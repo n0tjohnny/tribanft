@@ -244,8 +244,8 @@ class BackupManager:
         
         return {
             'count': len(backups),
-            'newest': backups[0][0] if backups else None,
-            'oldest': backups[-1][0] if backups else None,
+            'newest': backups[0][0] if len(backups) > 0 else None,
+            'oldest': backups[-1][0] if len(backups) > 0 else None,
             'total_size': total_size
         }
 

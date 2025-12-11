@@ -351,7 +351,11 @@ class BlacklistWriter:
                                     self._write_ip_entry(f, ip_str, ips[ip_str])
                     
                     # Atomic rename: replaces old file with new one
-                    os.replace(temp_path, path)
+                    try:
+                        os.replace(temp_path, path)
+                    except OSError as e:
+                        self.logger.error(f"Failed to rename temp file to {path}: {e}")
+                        raise
                     
                 except Exception as e:
                     # Clean up temp file on error
