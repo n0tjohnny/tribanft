@@ -4,7 +4,7 @@ TribanFT Logging Configuration
 Centralized logging setup for the application.
 
 Configures:
-- File logging to /var/log/tribanft.log
+- File logging to XDG state directory or fallback location
 - Console output to stdout
 - Log level management (INFO/DEBUG)
 - Module-specific filtering to reduce noise
@@ -18,6 +18,8 @@ License: GNU GPL v3
 
 import logging
 import sys
+import os
+from pathlib import Path
 
 
 def setup_logging(level=logging.INFO):
@@ -25,7 +27,7 @@ def setup_logging(level=logging.INFO):
     Configure application-wide logging with file and console handlers.
     
     Sets up dual logging:
-    - File handler: /var/log/tribanft.log
+    - File handler: Uses XDG_STATE_HOME or falls back to /tmp if no write permissions
     - Console handler: stdout
     
     In non-DEBUG mode, reduces verbosity for parsers and detectors
@@ -38,14 +40,44 @@ def setup_logging(level=logging.INFO):
         >>> setup_logging(level=logging.DEBUG)  # Verbose mode
         >>> setup_logging()  # Normal mode (INFO)
     """
+    # Determine log file location
+    log_file = None
+    
+    # Try config-based path first
+    try:
+        from ..config import get_config
+        config = get_config()
+        log_file = Path(config.state_dir) / 'tribanft.log'
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+    except (ImportError, AttributeError, PermissionError) as e:
+        # Config not available or permission denied
+        pass
+    
+    # Fallback: try /var/log
+    if log_file is None:
+        try:
+            log_file = Path('/var/log/tribanft.log')
+            # Test if we can write
+            log_file.touch(exist_ok=True)
+        except (PermissionError, OSError):
+            # Final fallback: use /tmp
+            log_file = Path('/tmp/tribanft.log')
+    
     # Clean formatter for readable logs
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
     # Dual output: file + console
     handlers = [
-        logging.FileHandler('/var/log/tribanft.log'),
         logging.StreamHandler(sys.stdout)
     ]
+    
+    # Add file handler if we have a writable location
+    try:
+        handlers.append(logging.FileHandler(str(log_file)))
+    except (PermissionError, OSError) as e:
+        # If file logging fails, just log to console
+        print(f"Warning: Could not create log file {log_file}: {e}", file=sys.stderr)
+        print("Logging to console only", file=sys.stderr)
     
     # Configure root logger
     logging.basicConfig(

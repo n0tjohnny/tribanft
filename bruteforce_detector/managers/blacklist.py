@@ -59,7 +59,7 @@ class BlacklistManager:
         self.geolocation_manager = geolocation_manager
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
-        self.manual_blacklist_file = "/root/manual_blacklist.txt"
+        self.manual_blacklist_file = self.config.manual_blacklist_file
         
         # Initialize specialized modules
         self.log_searcher = LogSearcher(self.config)
