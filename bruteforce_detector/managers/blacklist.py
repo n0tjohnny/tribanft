@@ -25,7 +25,7 @@ from typing import Set, List, Dict, Tuple
 import ipaddress
 from pathlib import Path
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..models import DetectionResult
 from ..config import get_config
@@ -175,6 +175,22 @@ class BlacklistManager:
             self.logger.error(f"❌ NFTables sync error: {e}")
             return 0, 0
     
+    def _normalize_datetime(self, dt) -> datetime:
+        """
+        Ensure datetime is timezone-aware (UTC).
+        
+        Converts naive datetimes to UTC and preserves aware datetimes.
+        Required for consistent timestamp comparisons across sources.
+        """
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                # Naive datetime - assume UTC
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+        return None
+    
     def bulk_update_metadata(self, metadata_updates: Dict[str, Dict]):
         """
         Bulk update metadata for existing IPs.
@@ -241,14 +257,14 @@ class BlacklistManager:
                     existing_entry['geolocation'] = new_metadata['geolocation']
                 
                 # Use earliest first_seen
-                existing_first = existing_entry.get('first_seen')
-                new_first = new_metadata.get('first_seen')
+                existing_first = self._normalize_datetime(existing_entry.get('first_seen'))
+                new_first = self._normalize_datetime(new_metadata.get('first_seen'))
                 if new_first and (not existing_first or new_first < existing_first):
                     existing_entry['first_seen'] = new_first
                 
                 # Use most recent last_seen
-                existing_last = existing_entry.get('last_seen')
-                new_last = new_metadata.get('last_seen')
+                existing_last = self._normalize_datetime(existing_entry.get('last_seen'))
+                new_last = self._normalize_datetime(new_metadata.get('last_seen'))
                 if new_last and (not existing_last or new_last > existing_last):
                     existing_entry['last_seen'] = new_last
                 

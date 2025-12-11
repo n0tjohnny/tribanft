@@ -19,7 +19,7 @@ License: GNU GPL v3
 
 from typing import Dict, Set, List
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import ipaddress
 import re
@@ -230,7 +230,7 @@ class BlacklistWriter:
                     ts_str = match.group(1).strip()
                     if ts_str and ts_str != 'Unknown':
                         try:
-                            info[ts_field] = datetime.strptime(ts_str, '%Y-%m-%d %H:%M')
+                            info[ts_field] = datetime.strptime(ts_str, '%Y-%m-%d %H:%M').replace(tzinfo=timezone.utc)
                         except ValueError:
                             pass
         
