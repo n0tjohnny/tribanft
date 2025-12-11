@@ -20,6 +20,7 @@ License: GNU GPL v3
 from typing import Dict, Set, List
 from pathlib import Path
 from datetime import datetime, timezone
+from collections import defaultdict
 import logging
 import ipaddress
 import re
@@ -422,17 +423,26 @@ class BlacklistWriter:
             self.logger.debug(f"Backup cleanup error: {e}")
     
     def _group_by_source(self, ips_info: Dict[str, Dict]) -> Dict[str, Dict]:
-        """Organize IPs by detection source."""
-        by_source = {
-            'automatic': {}, 'manual': {}, 'nftables': {}, 'nftables_port_scanners': {},
-            'crowdsec': {}, 'legacy': {}
-        }
+        """
+        Organize IPs by detection source with dynamic source support.
+        
+        Uses defaultdict to automatically handle new source types without
+        schema updates. This prevents KeyError when enrichment adds sources
+        like 'crowdsec_alerts' that aren't in the predefined whitelist.
+        
+        Args:
+            ips_info: Dict mapping IP strings to metadata
+            
+        Returns:
+            Dict mapping source names to dicts of {ip: metadata}
+        """
+        by_source = defaultdict(dict)
         
         for ip_str, info in ips_info.items():
             source = info.get('source') or 'legacy'
             by_source[source][ip_str] = info
         
-        return by_source
+        return dict(by_source)  # Convert to regular dict for consistent output
     
     def _write_ip_entry(self, file_obj, ip_str: str, info: Dict):
         """Write formatted IP entry with metadata."""
