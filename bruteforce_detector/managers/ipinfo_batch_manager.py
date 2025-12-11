@@ -319,7 +319,7 @@ class IPInfoBatchManager:
         
         for attempt in range(max_retries):
             try:
-                with self.file_lock("cache save", timeout=60):
+                with self.file_lock("cache save"):
                     # Define temp file path once
                     temp_file = self.results_file.parent / f'{self.results_file.name}.tmp'
                     
@@ -360,7 +360,7 @@ class IPInfoBatchManager:
         
         for attempt in range(max_retries):
             try:
-                with self.file_lock("stats save", timeout=60):
+                with self.file_lock("stats save"):
                     # Define temp file path once
                     temp_file = self.stats_file.parent / f'{self.stats_file.name}.tmp'
                     

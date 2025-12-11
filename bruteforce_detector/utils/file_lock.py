@@ -96,6 +96,7 @@ def file_lock(lock_path: Path, timeout: int = 30, description: str = "operation"
                 retry_delay *= 1.5
         
         # Lock acquired, write PID and timestamp for debugging
+        # Note: This is safe from race conditions because we hold an exclusive lock
         try:
             lock_file.seek(0)
             lock_file.truncate()
