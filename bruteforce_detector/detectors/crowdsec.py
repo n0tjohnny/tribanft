@@ -247,7 +247,7 @@ class CrowdSecDetector(BaseDetector):
         """
         try:
             result = subprocess.run(
-                ['cscli', 'alerts', 'list', '-o', 'json'],
+                ['cscli', 'alerts', 'list', '-a', '-o', 'json'],
                 capture_output=True,
                 text=True,
                 timeout=30  # Alerts can take longer than decisions
@@ -364,10 +364,13 @@ class CrowdSecDetector(BaseDetector):
     
     def enrich_from_historical_alerts(self, existing_ips: set) -> Dict[str, Dict]:
         """
-        Query CrowdSec historical alerts for existing blacklisted IPs.
+        Query CrowdSec historical alerts and return ALL alert IPs with metadata.
         
-        For IPs already in blacklist but potentially missing metadata,
-        fetch enrichment data from CrowdSec alerts API:
+        Returns both:
+        - IPs already in blacklist (for enrichment)
+        - NEW IPs not in blacklist (for import)
+        
+        Fetches from CrowdSec alerts API:
         - Original detection reason (scenario)
         - Event counts
         - Timestamps (created_at)
@@ -376,10 +379,10 @@ class CrowdSecDetector(BaseDetector):
         Uses: cscli alerts list -o json
         
         Args:
-            existing_ips: Set of IP strings currently in blacklist
+            existing_ips: Set of IP strings currently in blacklist (used for logging only)
             
         Returns:
-            Dict of metadata to merge with existing entries:
+            Dict of metadata for ALL alert IPs (existing + new):
             {
                 '1.2.3.4': {
                     'ip': IPv4Address('1.2.3.4'),
@@ -393,9 +396,6 @@ class CrowdSecDetector(BaseDetector):
                 }
             }
         """
-        if not existing_ips:
-            return {}
-        
         try:
             # Query historical alerts
             alert_ips = self._get_crowdsec_alerts()
@@ -404,12 +404,14 @@ class CrowdSecDetector(BaseDetector):
                 self.logger.debug("No CrowdSec historical alerts found")
                 return {}
             
-            # Filter to only IPs that are in existing blacklist
+            # Process ALL alert IPs (not just existing ones)
             enrichment_data = {}
+            new_ips_count = 0
             
             for ip_str, alert_metadata in alert_ips.items():
+                # Track if this is a new import or enrichment
                 if ip_str not in existing_ips:
-                    continue
+                    new_ips_count += 1
                 
                 try:
                     ip_obj = ipaddress.ip_address(ip_str)
@@ -439,7 +441,11 @@ class CrowdSecDetector(BaseDetector):
                     continue
             
             if enrichment_data:
-                self.logger.info(f"Found metadata for {len(enrichment_data)} IPs from CrowdSec alerts")
+                existing_count = len(enrichment_data) - new_ips_count
+                self.logger.info(
+                    f"Found metadata for {len(enrichment_data)} IPs from CrowdSec alerts "
+                    f"({new_ips_count} new, {existing_count} existing)"
+                )
             
             return enrichment_data
             

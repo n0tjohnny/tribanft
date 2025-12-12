@@ -2,7 +2,7 @@
 Description=TribanFT IP Geolocation Batch Service
 Documentation=https://github.com/n0tjohnny/tribanft
 After=network-online.target
-Wants=network-online. target
+Wants=network-online.target
 
 [Service]
 Type=simple
