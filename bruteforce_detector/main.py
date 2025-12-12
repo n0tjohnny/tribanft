@@ -224,10 +224,9 @@ class BruteForceDetectorEngine:
         
         Runs periodically during detection cycle:
         1. Import port_scanners from NFTables with calculated timestamps
-        2. Import NEW IPs from CrowdSec historical alerts
-        3. Enrich existing IPs with CrowdSec historical alert data
-        4. Update database/files with enriched metadata
-        5. Auto-sync to maintain consistency
+        2. Enrich existing IPs with CrowdSec historical alert data
+        3. Update database/files with enriched metadata
+        4. Auto-sync to maintain consistency
         
         Prevents metadata loss by constantly refreshing from sources.
         This ensures IPs never lose their context, geolocation, or detection reason.
@@ -264,30 +263,11 @@ class BruteForceDetectorEngine:
                     if crowdsec_detector:
                         crowdsec_data = crowdsec_detector.enrich_from_historical_alerts(existing_ipv4)
                         if crowdsec_data:
-                            # Separate new imports from enrichment updates
-                            new_imports = {}
-                            enrichment_updates = {}
-                            
+                            # Merge CrowdSec data (only for IPs not already enriched)
                             for ip_str, metadata in crowdsec_data.items():
-                                if ip_str in existing_ipv4:
-                                    # Existing IP - enrich metadata
-                                    if ip_str not in enriched_data:
-                                        enrichment_updates[ip_str] = metadata
-                                else:
-                                    # New IP - import to blacklist
-                                    new_imports[ip_str] = metadata
-                            
-                            # Log results
-                            if new_imports:
-                                self.logger.info(f"   📥 Importing {len(new_imports)} NEW IPs from CrowdSec alerts")
-                            if enrichment_updates:
-                                self.logger.info(f"   📥 Enriching {len(enrichment_updates)} existing IPs from CrowdSec alerts")
-                                enriched_data.update(enrichment_updates)
-                            
-                            # Import new IPs to blacklist
-                            if new_imports:
-                                self._import_crowdsec_alerts(new_imports)
-                                
+                                if ip_str not in enriched_data:
+                                    enriched_data[ip_str] = metadata
+                            self.logger.info(f"   📥 Enriched {len(crowdsec_data)} IPs from CrowdSec alerts")
                 except Exception as e:
                     self.logger.warning(f"   ⚠️  CrowdSec enrichment failed: {e}")
             
@@ -300,55 +280,6 @@ class BruteForceDetectorEngine:
         
         except Exception as e:
             self.logger.error(f"   ❌ Metadata enrichment failed: {e}")
-            import traceback
-            self.logger.debug(traceback.format_exc())
-    
-    def _import_crowdsec_alerts(self, new_ips_data: dict):
-        """
-        Import new IPs discovered in CrowdSec alerts but not yet in blacklist.
-        
-        These are IPs that:
-        - Were detected by CrowdSec (not by tribanFT's own detectors)
-        - Attacked services we don't monitor (e.g., HTTP-only attacks)
-        - Were blocked before tribanFT saw them
-        
-        Args:
-            new_ips_data: Dict mapping IP strings to metadata
-                Format: {'1.2.3.4': {'ip': IPv4Address, 'reason': '...', ...}}
-        """
-        if not new_ips_data:
-            return
-        
-        try:
-            # Split by IP version for proper blacklist file routing
-            ipv4_imports = {}
-            ipv6_imports = {}
-            
-            for ip_str, metadata in new_ips_data.items():
-                ip_obj = metadata.get('ip')
-                if ip_obj:
-                    if ip_obj.version == 4:
-                        ipv4_imports[ip_str] = metadata
-                    else:
-                        ipv6_imports[ip_str] = metadata
-            
-            # Import to blacklist files using existing infrastructure
-            if ipv4_imports:
-                self.blacklist_manager._update_blacklist_file(
-                    self.config.blacklist_ipv4_file,
-                    ipv4_imports
-                )
-                self.logger.info(f"   ✅ Imported {len(ipv4_imports)} IPv4 from CrowdSec alerts")
-            
-            if ipv6_imports:
-                self.blacklist_manager._update_blacklist_file(
-                    self.config.blacklist_ipv6_file,
-                    ipv6_imports
-                )
-                self.logger.info(f"   ✅ Imported {len(ipv6_imports)} IPv6 from CrowdSec alerts")
-                
-        except Exception as e:
-            self.logger.error(f"   ❌ Failed to import CrowdSec alerts: {e}")
             import traceback
             self.logger.debug(traceback.format_exc())
 

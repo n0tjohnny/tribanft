@@ -247,7 +247,7 @@ class CrowdSecDetector(BaseDetector):
         """
         try:
             result = subprocess.run(
-                ['cscli', 'alerts', 'list', '-a', '-o', 'json'],
+                ['cscli', 'alerts', 'list', '-o', 'json'],
                 capture_output=True,
                 text=True,
                 timeout=30  # Alerts can take longer than decisions
