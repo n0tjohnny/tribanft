@@ -193,7 +193,7 @@ pattern_groups:
     - regex: '(?i)(?:&&|\|\|)\s*(?:cat|type)\s+(?:/etc/|c:\\)'
       description: 'Chained command with file read'
 
-    - regex: '(?i)(?:`|\\$\\(|\\$\\{).*(?:ls|cat|id|whoami|pwd)'
+    - regex: '(?i)(?:`|\$\(|\$\{).*(?:ls|cat|id|whoami|pwd)'
       description: 'Command substitution injection'
 
   # ┌─────────────────────────────────────────────────────────────────────┐

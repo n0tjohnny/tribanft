@@ -100,6 +100,17 @@ Major security improvements including new attack detection, firewall log parsing
   - Deployment checklist
   - Security impact assessment
 
+#### Blacklist Management
+- **IP Removal Command** (`tribanft --blacklist-remove <ip>`)
+  - Remove IPs from blacklist database and files
+  - Removes from NFTables if sync enabled
+  - Validates IP address format
+  - Methods added:
+    - `BlacklistDatabase.delete_ip()` - Delete from SQLite
+    - `BlacklistAdapter.remove_ip()` - Remove from storage layer
+    - `BlacklistAdapter._remove_from_files()` - Remove from text files with metadata cleanup
+    - `BlacklistManager.remove_ip()` - High-level removal with NFTables sync
+
 ### Changed
 
 #### Pattern Refinements (Reduced False Positives)
@@ -117,6 +128,23 @@ Major security improvements including new attack detection, firewall log parsing
 #### Code Organization
 - Removed leading/trailing `.*` from patterns for better performance
 - Improved pattern descriptions for clarity
+
+#### Configuration Architecture
+- **Port Scan Thresholds** - Made configurable in YAML (was hardcoded)
+  - `nftables.yaml` now controls detection sensitivity via `configuration` section
+  - `port_scan_threshold`: Number of ports to trigger PORT_SCAN event (default: 5)
+  - `network_scan_threshold`: Number of attempts to trigger NETWORK_SCAN event (default: 10)
+  - Parser loads configuration at initialization with fallback to defaults
+  - Users can tune without modifying Python code
+  - Location: `bruteforce_detector/rules/parsers/nftables.yaml`
+
+#### Documentation Compliance
+- **Removed emojis from code** - Compliance with DOCUMENTATION_GUIDE.md
+  - Removed checkmark emojis from log messages in:
+    - `database.py`
+    - `blacklist_adapter.py`
+    - `blacklist.py`
+  - All log output now text-only per documentation standards
 
 ### Security
 
@@ -144,6 +172,17 @@ Major security improvements including new attack detection, firewall log parsing
 - Layer coherence issues (L3/L4 vs L7 EventType mismatches now prevented)
 - Silent detector failures (misconfigured detectors now caught at load time)
 - SQL injection false positives (patterns now require SQL context)
+- **Invalid regex in apache.yaml** - Command injection pattern 3 had double-escaped parentheses
+  - Changed from `(?i)(?:\`|\\$\\(|\\$\\{)` to `(?i)(?:\`|\$\(|\$\{)`
+  - Pattern now compiles correctly and matches command substitution attacks
+- **NFTables YAML warnings** - Moved documentation patterns outside `pattern_groups`
+  - `common_scan_patterns` were documentation-only (no regex), causing loader warnings
+  - Converted to comment-based documentation section
+  - Parser pattern loader no longer warns about missing regex fields
+- **Syntax error in main.py** - Fixed try/except block indentation
+  - Line 353 logger statement was outside try block
+  - Moved inside try block where it belongs
+  - File now compiles without syntax errors
 
 ### Performance
 

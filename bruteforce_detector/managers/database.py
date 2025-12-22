@@ -416,10 +416,41 @@ class BlacklistDatabase:
     def backup(self):
         """Create daily database backup."""
         backup_path = Path(str(self.db_path) + f".backup.{datetime.now().strftime('%Y%m%d')}")
-        
+
         try:
             import shutil
             shutil.copy2(self.db_path, backup_path)
             self.logger.info(f"Database backup created: {backup_path.name}")
         except Exception as e:
             self.logger.error(f"Backup failed: {e}")
+
+    def delete_ip(self, ip_str: str) -> bool:
+        """
+        Delete IP from blacklist database.
+
+        Args:
+            ip_str: IP address to remove
+
+        Returns:
+            True if IP was deleted, False if not found
+        """
+        try:
+            with sqlite3.connect(self.db_path, timeout=30) as conn:
+                cursor = conn.cursor()
+
+                # Check if IP exists
+                cursor.execute("SELECT ip FROM blacklist WHERE ip = ?", (ip_str,))
+                if not cursor.fetchone():
+                    self.logger.warning(f"IP {ip_str} not found in database")
+                    return False
+
+                # Delete the IP
+                cursor.execute("DELETE FROM blacklist WHERE ip = ?", (ip_str,))
+                conn.commit()
+
+                self.logger.info(f"Deleted {ip_str} from database")
+                return True
+
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error deleting {ip_str}: {e}")
+            return False

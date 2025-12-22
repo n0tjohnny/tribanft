@@ -147,7 +147,50 @@ class BlacklistManager:
         except ValueError:
             self.logger.error(f"ERROR: Invalid IP address: {ip_str}")
             return False
-    
+
+    def remove_ip(self, ip_str: str) -> bool:
+        """
+        Remove IP from blacklist (database and files).
+
+        Process:
+        1. Validate IP address format
+        2. Remove from database/files
+        3. Remove from NFTables (if sync enabled)
+        4. Log removal
+
+        Args:
+            ip_str: IP address to remove
+
+        Returns:
+            True if successful, False if invalid IP or not found
+        """
+        try:
+            ip = ipaddress.ip_address(ip_str)
+
+            # Remove from storage (database + files)
+            success = self.storage.remove_ip(ip_str)
+
+            if success:
+                # Remove from NFTables if sync enabled
+                if self.config.enable_nftables_update:
+                    try:
+                        from ..utils.nftables_sync import NFTablesSync
+                        nft = NFTablesSync(self.config)
+                        nft.remove_ip_from_set(ip_str)
+                        self.logger.info(f"Removed {ip_str} from NFTables")
+                    except Exception as e:
+                        self.logger.warning(f"Could not remove {ip_str} from NFTables: {e}")
+
+                self.logger.info(f"Successfully removed {ip_str} from blacklist")
+                return True
+            else:
+                self.logger.warning(f"IP {ip_str} was not in blacklist")
+                return False
+
+        except ValueError:
+            self.logger.error(f"ERROR: Invalid IP address: {ip_str}")
+            return False
+
     def sync_from_nftables(self, sync_to_nftables: bool = False, 
                           add_geolocation: bool = False) -> Tuple[int, int]:
         """

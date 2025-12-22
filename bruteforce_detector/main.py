@@ -14,6 +14,7 @@ Usage:
     tribanft --detect                    # Run detection cycle
     tribanft --show-blacklist           # Display current blacklist
     tribanft --blacklist-add <ip>       # Manually block IP
+    tribanft --blacklist-remove <ip>    # Remove IP from blacklist
     tribanft --whitelist-add <ip>       # Whitelist IP
 
 Author: TribanFT Project
@@ -349,7 +350,7 @@ class BruteForceDetectorEngine:
                     port_scanner_ips = self.blacklist_manager.nft_sync.get_port_scanners()
                     if port_scanner_ips:
                         enriched_data.update(port_scanner_ips)
-        self.logger.info(f"   Found {len(port_scanner_ips)} IPs in port_scanners")
+                        self.logger.info(f"   Found {len(port_scanner_ips)} IPs in port_scanners")
                 except Exception as e:
                     self.logger.warning(f"   WARNING: Port scanner import failed: {e}")
             
@@ -462,7 +463,7 @@ def main():
     Supported operations:
     - Detection cycle (--detect)
     - Whitelist management (--whitelist-add/remove)
-    - Blacklist management (--blacklist-add, --show-blacklist)
+    - Blacklist management (--blacklist-add/remove, --show-blacklist)
     - Log search (--blacklist-search)
     - Manual IP investigation (--no-log-search to skip)
     """
@@ -471,6 +472,7 @@ def main():
     parser.add_argument('--whitelist-add', type=str, help='Add IP to whitelist')
     parser.add_argument('--whitelist-remove', type=str, help='Remove IP from whitelist')
     parser.add_argument('--blacklist-add', type=str, help='Add IP to manual blacklist')
+    parser.add_argument('--blacklist-remove', type=str, help='Remove IP from blacklist')
     parser.add_argument('--blacklist-reason', type=str, help='Reason for manual blacklisting')
     parser.add_argument('--no-log-search', action='store_true', help='Skip log search when adding manual IP')
     parser.add_argument('--blacklist-search', type=str, help='Search logs for IP activity before adding')
@@ -732,6 +734,9 @@ def main():
         reason = args.blacklist_reason or "Manually added by administrator"
         search_logs = not args.no_log_search  # Search logs unless explicitly disabled
         success = engine.blacklist_manager.add_manual_ip(args.blacklist_add, reason, search_logs)
+        sys.exit(0 if success else 1)
+    elif args.blacklist_remove:
+        success = engine.blacklist_manager.remove_ip(args.blacklist_remove)
         sys.exit(0 if success else 1)
     elif args.blacklist_search:
         log_analysis = engine.blacklist_manager._search_logs_for_ip(args.blacklist_search)

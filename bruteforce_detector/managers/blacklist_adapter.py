@@ -408,3 +408,99 @@ class BlacklistAdapter:
                 'ipv6': len(ipv6),
                 'backend': 'file'
             }
+
+    def remove_ip(self, ip_str: str) -> bool:
+        """
+        Remove IP from blacklist storage (database and files).
+
+        Args:
+            ip_str: IP address to remove
+
+        Returns:
+            True if successfully removed, False otherwise
+        """
+        success = False
+
+        if self.use_database:
+            # Remove from database
+            success = self.db.delete_ip(ip_str)
+
+            # Also remove from files if sync is enabled
+            if getattr(self.config, 'sync_to_file', True):
+                self._remove_from_files(ip_str)
+        else:
+            # File backend only
+            success = self._remove_from_files(ip_str)
+
+        return success
+
+    def _remove_from_files(self, ip_str: str) -> bool:
+        """
+        Remove IP from blacklist text files.
+
+        Args:
+            ip_str: IP address to remove
+
+        Returns:
+            True if removed from any file, False otherwise
+        """
+        try:
+            import ipaddress
+            ip = ipaddress.ip_address(ip_str)
+
+            # Determine which file to modify
+            if ip.version == 4:
+                filepath = Path(self.config.blacklist_ipv4_file)
+            else:
+                filepath = Path(self.config.blacklist_ipv6_file)
+
+            if not filepath.exists():
+                self.logger.warning(f"Blacklist file {filepath} not found")
+                return False
+
+            # Read all lines
+            with open(filepath, 'r') as f:
+                lines = f.readlines()
+
+            # Filter out the IP (including its metadata comments)
+            new_lines = []
+            skip_next = False
+            found = False
+
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+
+                # Skip comments for IP we're removing
+                if skip_next:
+                    if stripped.startswith('#'):
+                        continue
+                    else:
+                        skip_next = False
+
+                # Check if this is the IP line
+                if stripped == ip_str:
+                    found = True
+                    skip_next = True  # Skip subsequent comment lines
+                    # Skip lines above this IP (metadata comments)
+                    while new_lines and new_lines[-1].strip().startswith('#'):
+                        new_lines.pop()
+                    continue
+
+                new_lines.append(line)
+
+            if found:
+                # Write back without the removed IP
+                with open(filepath, 'w') as f:
+                    f.writelines(new_lines)
+                self.logger.info(f"Removed {ip_str} from {filepath.name}")
+                return True
+            else:
+                self.logger.warning(f"IP {ip_str} not found in {filepath.name}")
+                return False
+
+        except (ValueError, ipaddress.AddressValueError):
+            self.logger.error(f"Invalid IP address: {ip_str}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error removing {ip_str} from files: {e}")
+            return False

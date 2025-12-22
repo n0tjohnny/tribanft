@@ -234,6 +234,20 @@ crowdsec_sets = inet filter crowdsec
 # Fail2Ban sets pattern
 fail2ban_pattern = inet f2b-table addr-set-*
 
+# ───────────────────────────────────────────────────────────────────────────
+# NFTables Parser Configuration (Port Scan Detection Thresholds)
+# ───────────────────────────────────────────────────────────────────────────
+# NOTE: Port scan and network scan thresholds are configured in YAML, not here.
+#
+# To adjust detection sensitivity, edit:
+#   bruteforce_detector/rules/parsers/nftables.yaml
+#
+# Configuration section:
+#   port_scan_threshold: 5      # Number of ports to trigger PORT_SCAN (default: 5)
+#   network_scan_threshold: 10  # Number of attempts to trigger NETWORK_SCAN (default: 10)
+#
+# See docs/PARSER_EVENTTYPES_MAPPING.md for details on parser configuration.
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # [advanced] - Advanced Settings (Do Not Modify Unless You Know What You're Doing)
