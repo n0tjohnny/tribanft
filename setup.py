@@ -32,10 +32,11 @@ class PostInstallCommand(install):
 
 setup(
     name="tribanft",
-    version="2.2.0",
+    version="2.3.0",
     packages=find_packages(),
     install_requires=[
         "pydantic",
+        "watchdog>=3.0.0",
     ],
     entry_points={
         'console_scripts': [

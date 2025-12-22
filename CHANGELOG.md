@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] - 2025-12-22
+
+### Real-Time Monitoring Release
+
+Major architectural upgrade: real-time log monitoring with inotify/kqueue instead of periodic polling. Detection lag reduced from 5 minutes to <2 seconds.
+
+### Added
+
+#### Real-Time Log Monitoring
+- **LogWatcher** (`bruteforce_detector/core/log_watcher.py`)
+  - File system event monitoring using inotify (Linux) / kqueue (BSD/macOS)
+  - Incremental log reading with byte offset tracking
+  - Automatic file rotation detection and handling
+  - Per-file thread-safe locking
+  - Debouncing for rapid log writes (1s window)
+  - Rate limiting for DoS protection (1000 events/s max)
+  - Automatic fallback to periodic mode if watchdog unavailable
+
+- **RealtimeDetectionMixin** (`bruteforce_detector/core/realtime_engine.py`)
+  - Extends BruteForceDetectorEngine with real-time capabilities
+  - Graceful degradation on errors (automatic fallback to periodic mode)
+  - File position persistence in state.json
+  - Separate detection pipeline for real-time events
+
+- **Incremental Parsing** (`bruteforce_detector/parsers/base.py`)
+  - `parse_incremental(from_offset, to_offset)` method in BaseLogParser
+  - Reads only new log lines since last position
+  - Returns (events, final_offset) for position tracking
+  - Compatible with all existing parsers (syslog, mssql, apache, nginx)
+
+#### State Management Improvements
+- **Atomic State Writes with Backup** (`bruteforce_detector/managers/state.py`)
+  - Automatic backup before state file updates
+  - Corruption recovery from .bak file
+  - Temp file + atomic rename pattern
+  - Handles both file corruption scenarios
+
+- **File Position Tracking** (`bruteforce_detector/models.py`)
+  - `ProcessingState.last_processed_positions` dict for byte offsets
+  - Per-file position persistence
+  - Compatible with existing timestamp-based filtering
+
+#### Migration Tools
+- **Migration Assistant** (`bruteforce_detector/utils/migration.py`)
+  - Detects legacy cron-based setups
+  - `tribanft --migrate` command for automated migration
+  - Automatic warnings in daemon mode if cron detected
+  - Step-by-step migration guide display
+
+#### Configuration
+- **Real-Time Section** in `config.conf.template`
+  - `monitor_syslog`, `monitor_mssql`, `monitor_apache`, `monitor_nginx` (per-source enable/disable)
+  - `monitor_files` (custom file list override)
+  - `debounce_interval` (batch rapid writes, default: 1.0s)
+  - `max_events_per_second` (rate limit, default: 1000)
+  - `rate_limit_backoff` (pause duration, default: 30s)
+  - `fallback_interval` (periodic mode interval, default: 60s)
+
+### Changed
+
+#### Daemon Mode Behavior
+- **Breaking**: `--daemon` now runs real-time monitoring by default
+- **Removed**: `--interval` parameter (no longer needed)
+- **Automatic fallback**: Periodic mode (60s) if watchdog unavailable
+- **Systemd service** updated to use new real-time mode
+
+#### Detection Pipeline
+- Event processing is now immediate instead of batched every 5 minutes
+- File rotation handled automatically (truncation detection + position reset)
+- State updates every 60s to persist file positions
+
+### Fixed
+- File rotation edge cases (log rotation during processing)
+- State corruption during power loss (atomic writes + backup)
+- Memory usage with large log files (incremental reading vs. full file)
+
+### Dependencies
+- **Added**: `watchdog>=3.0.0` (optional, falls back to periodic if missing)
+
+### Migration Guide
+
+**For existing cron-based setups:**
+
+1. Run migration assistant:
+   ```bash
+   tribanft --migrate
+   ```
+
+2. Or manually:
+   ```bash
+   # Disable cron
+   sudo rm /etc/cron.d/tribanft
+   crontab -e  # Remove tribanft entries
+
+   # Install systemd service
+   sudo cp systemd/tribanft.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable tribanft
+   sudo systemctl start tribanft
+
+   # Verify
+   sudo systemctl status tribanft
+   sudo journalctl -u tribanft -f
+   ```
+
+3. Install watchdog (optional, but recommended):
+   ```bash
+   pip install watchdog>=3.0.0
+   ```
+
+**Backward compatibility:**
+- Single detection runs (`tribanft --detect`) work unchanged
+- Existing config files work without modification
+- System auto-detects watchdog availability and falls back gracefully
+
+---
+
 ## [2.2.0] - 2025-12-22
 
 ### Security Enhancement Release
@@ -169,6 +286,13 @@ Major security improvements including new attack detection, firewall log parsing
 
 ### Fixed
 
+- **EventType integration** - DetectionResult now includes event_type field
+  - Added `event_type: EventType` field to DetectionResult dataclass (models.py:193)
+  - Updated `_create_detection_result()` to propagate detector event_type (base.py:144)
+  - Updated rule engine `_create_detection()` to use source event type (rule_engine.py:467)
+  - `to_dict()` now serializes event_type for JSON storage (models.py:206)
+  - Fixes: CROWDSEC_BLOCK and KNOWN_MALICIOUS_IP EventTypes now properly propagated
+  - Impact: Detection results can now be filtered by attack type, metrics by threat category
 - Layer coherence issues (L3/L4 vs L7 EventType mismatches now prevented)
 - Silent detector failures (misconfigured detectors now caught at load time)
 - SQL injection false positives (patterns now require SQL context)

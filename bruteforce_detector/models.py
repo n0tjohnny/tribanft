@@ -180,6 +180,7 @@ class DetectionResult:
         reason: Human-readable explanation (e.g., "Failed login brute force: 25 attempts")
         confidence: Detection confidence level
         event_count: Number of events that triggered detection
+        event_type: Type of security event detected
         source_events: List of SecurityEvents that caused detection
         first_seen: Timestamp of first event in attack
         last_seen: Timestamp of last event in attack
@@ -189,6 +190,7 @@ class DetectionResult:
     reason: str
     confidence: DetectionConfidence
     event_count: int
+    event_type: EventType
     source_events: List[SecurityEvent] = field(default_factory=list)
     first_seen: Optional[datetime] = None
     last_seen: Optional[datetime] = None
@@ -201,6 +203,7 @@ class DetectionResult:
             'reason': self.reason,
             'confidence': self.confidence.value,
             'event_count': self.event_count,
+            'event_type': self.event_type.value,
             'first_seen': self.first_seen.isoformat() if self.first_seen else None,
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
             'geolocation': self.geolocation,

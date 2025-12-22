@@ -141,6 +141,7 @@ class BaseDetector(ABC):
                 reason=reason,
                 confidence=confidence_level,
                 event_count=event_count,
+                event_type=self.event_type,
                 source_events=source_events,
                 geolocation=None,  # Enriched later by BlacklistManager
                 first_seen=final_first_seen,

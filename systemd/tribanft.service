@@ -1,5 +1,5 @@
 [Unit]
-Description=TribanFT - IP Visibility & Intelligent Blacklist Management
+Description=TribanFT - Real-Time IP Visibility & Intelligent Blacklist Management
 Documentation=https://github.com/n0tjohnny/tribanft
 After=network.target nftables.service
 
@@ -8,8 +8,9 @@ Type=simple
 User=root
 Group=root
 
-# Main service command - runs in daemon mode
-ExecStart=/usr/bin/python3 /usr/local/bin/tribanft --daemon --interval 300
+# Main service command - runs in real-time daemon mode
+# Automatically uses real-time monitoring (inotify/kqueue) with fallback to periodic mode
+ExecStart=/usr/bin/python3 /usr/local/bin/tribanft --daemon
 
 # Restart policy
 Restart=on-failure

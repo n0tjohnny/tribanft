@@ -49,8 +49,11 @@ from bruteforce_detector.core.rule_engine import RuleEngine
 from bruteforce_detector.detectors.base import BaseDetector
 from bruteforce_detector.parsers.base import BaseLogParser
 
+# Real-time monitoring
+from bruteforce_detector.core.realtime_engine import RealtimeDetectionMixin
 
-class BruteForceDetectorEngine:
+
+class BruteForceDetectorEngine(RealtimeDetectionMixin):
     """
     Core detection engine that coordinates all components.
     
@@ -161,6 +164,9 @@ class BruteForceDetectorEngine:
             else:
                 self.rule_engine = None
                 self.logger.info("YAML rule engine disabled in config")
+
+            # Initialize real-time monitoring (with automatic fallback)
+            self._init_realtime()
 
         except Exception as e:
             self.logger.error(f"Failed to initialize detector engine: {e}")
@@ -480,8 +486,8 @@ def main():
     parser.add_argument('--show-blacklist', action='store_true', help='Show current blacklist')
     parser.add_argument('--show-manual', action='store_true', help='Show manual blacklist only')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
-    parser.add_argument('--daemon', action='store_true', help='Run as daemon service (continuous loop)')
-    parser.add_argument('--interval', type=int, default=300, help='Detection interval in seconds for daemon mode (default: 300)')
+    parser.add_argument('--daemon', action='store_true', help='Run as daemon service (real-time monitoring with auto-fallback)')
+    parser.add_argument('--migrate', action='store_true', help='Migrate from cron-based setup to systemd')
     parser.add_argument('--sync-files', action='store_true', help='Force sync database to blacklist files')
     parser.add_argument('--sync-output', type=str, help='Custom output file for sync (default: config file)')
     parser.add_argument('--sync-stats', action='store_true', help='Show database statistics with sync')
@@ -512,7 +518,13 @@ def main():
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     setup_logging(level=log_level)
-    
+
+    # Handle migration command
+    if args.migrate:
+        from bruteforce_detector.utils.migration import migrate_to_systemd
+        migrate_to_systemd(dry_run=False)
+        sys.exit(0)
+
     # Handle integrity and backup commands first (don't need full engine)
     if args.verify:
         from bruteforce_detector.utils.integrity_checker import IntegrityChecker
@@ -856,55 +868,27 @@ def main():
             print("No action specified. Running detection (use --detect to explicitly run)")
 
         if args.daemon:
-            # Daemon mode: run continuous loop with sleep interval
-            import time
-            import signal
-
+            # Daemon mode: real-time monitoring with automatic fallback
             logger = logging.getLogger(__name__)
-            logger.info(f"Starting TribanFT daemon (interval: {args.interval}s)")
 
-            # Graceful shutdown handler
-            shutdown_requested = False
+            # Check for old cron-based setup and warn
+            from bruteforce_detector.utils.migration import check_and_warn_migration
+            check_and_warn_migration(logger)
 
-            def signal_handler(signum, frame):
-                nonlocal shutdown_requested
-                logger.info(f"WARNING: Received signal {signum}, shutting down gracefully...")
-                shutdown_requested = True
+            if engine.realtime_available:
+                # Real-time monitoring mode
+                logger.info("Starting TribanFT in real-time mode")
+                try:
+                    engine.run_realtime()
+                except Exception as e:
+                    logger.error(f"Real-time monitoring failed: {e}")
+                    logger.info("Switching to periodic fallback...")
+                    engine.run_periodic_fallback()
+            else:
+                # Periodic fallback mode
+                logger.info("Real-time not available, using periodic mode")
+                engine.run_periodic_fallback()
 
-            # Register signal handlers
-            signal.signal(signal.SIGTERM, signal_handler)
-            signal.signal(signal.SIGINT, signal_handler)
-
-            cycle_count = 0
-
-            try:
-                while not shutdown_requested:
-                    cycle_count += 1
-                    logger.info(f"Detection cycle #{cycle_count} starting...")
-
-                    try:
-                        engine.run_detection()
-                        logger.info(f"SUCCESS: Detection cycle #{cycle_count} completed")
-                    except Exception as e:
-                        logger.error(f"ERROR: Detection cycle #{cycle_count} failed: {e}")
-                        import traceback
-                        logger.debug(traceback.format_exc())
-
-                    if shutdown_requested:
-                        break
-
-                    # Sleep in small increments to respond quickly to shutdown signals
-                    sleep_remaining = args.interval
-                    logger.info(f"Sleeping for {args.interval}s until next cycle...")
-
-                    while sleep_remaining > 0 and not shutdown_requested:
-                        time.sleep(min(5, sleep_remaining))
-                        sleep_remaining -= 5
-
-                logger.info("TribanFT daemon stopped")
-
-            except KeyboardInterrupt:
-                logger.info("WARNING: Interrupted by user, shutting down...")
         else:
             # Single detection run
             engine.run_detection()

@@ -463,12 +463,16 @@ class RuleEngine:
                 DetectionConfidence.MEDIUM
             )
 
+            # Get event_type from first source event
+            event_type = events[0].event_type if events else rule.event_types[0]
+
             # Create detection result
             detection = DetectionResult(
                 ip=ip,
                 reason=reason,
                 confidence=confidence_enum,
                 event_count=len(events),
+                event_type=event_type,
                 source_events=events,
                 first_seen=first_seen,
                 last_seen=last_seen

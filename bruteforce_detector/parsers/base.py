@@ -131,14 +131,14 @@ class BaseLogParser(ABC):
     def read_lines(self) -> Iterator[str]:
         """
         Read lines from log file with error handling.
-        
+
         Yields:
             Lines from log file as strings
         """
         if not self.log_path.exists():
             self.logger.error(f"Log file not found: {self.log_path}")
             return iter(())
-        
+
         try:
             with open(self.log_path, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
@@ -146,3 +146,60 @@ class BaseLogParser(ABC):
         except Exception as e:
             self.logger.error(f"Error reading log file {self.log_path}: {e}")
             return iter(())
+
+    def parse_incremental(self, from_offset: int, to_offset: int) -> Tuple[List[SecurityEvent], int]:
+        """
+        Parse log file incrementally from specific byte range.
+
+        Used by real-time monitoring to only process new log entries.
+        More efficient than reading entire file and filtering by timestamp.
+
+        Args:
+            from_offset: Starting byte position
+            to_offset: Ending byte position
+
+        Returns:
+            Tuple of (events, final_offset)
+            - events: List of SecurityEvent objects from this range
+            - final_offset: Actual bytes read (for position tracking)
+        """
+        events = []
+
+        if not self.log_path.exists():
+            self.logger.error(f"Log file not found: {self.log_path}")
+            return ([], from_offset)
+
+        try:
+            with open(self.log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                # Seek to starting position
+                f.seek(from_offset)
+
+                # Read until end position
+                bytes_read = from_offset
+
+                while bytes_read < to_offset:
+                    line = f.readline()
+
+                    if not line:
+                        # EOF reached
+                        break
+
+                    # Track actual bytes read (including newline)
+                    bytes_read = f.tell()
+
+                    # Parse line (subclasses implement _parse_line)
+                    if hasattr(self, '_parse_line'):
+                        # Don't use since_timestamp filter - we're already reading incrementally
+                        event = self._parse_line(line.strip(), since_timestamp=None)
+                        if event:
+                            events.append(event)
+
+                    # Safety check: don't read beyond requested range
+                    if bytes_read >= to_offset:
+                        break
+
+                return (events, bytes_read)
+
+        except Exception as e:
+            self.logger.error(f"Error in incremental parsing {self.log_path}: {e}")
+            return ([], from_offset)

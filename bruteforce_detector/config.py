@@ -105,7 +105,7 @@ def load_config_file() -> dict:
     # All other sections -> BFD_* environment variables
     for section in ['detection', 'features', 'storage', 'performance',
                     'logs', 'data_files', 'state_files', 'ipinfo',
-                    'nftables', 'advanced']:
+                    'nftables', 'advanced', 'realtime']:
         if parser.has_section(section):
             for key, value in parser.items(section):
                 # Expand tilde in paths
@@ -329,6 +329,17 @@ class DetectorConfig(BaseSettings):
     verbose: bool = False
     skip_verify: bool = False
     min_expected_ips: int = 1000  # Anti-corruption protection threshold
+
+    # === Real-Time Monitoring (NEW in v2.3) ===
+    monitor_syslog: bool = True
+    monitor_mssql: bool = True
+    monitor_apache: bool = True
+    monitor_nginx: bool = True
+    monitor_files: Optional[str] = None  # Comma-separated list of custom files
+    debounce_interval: float = 1.0
+    max_events_per_second: int = 1000
+    rate_limit_backoff: int = 30
+    fallback_interval: int = 60
 
     model_config = {
         'env_prefix': 'BFD_',

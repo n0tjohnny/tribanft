@@ -250,6 +250,50 @@ fail2ban_pattern = inet f2b-table addr-set-*
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# [realtime] - Real-Time Log Monitoring (NEW in v2.3)
+# ═══════════════════════════════════════════════════════════════════════════
+[realtime]
+
+# Real-time monitoring uses filesystem events (inotify/kqueue) to detect
+# new log entries immediately, reducing detection lag from 5 minutes to <2 seconds.
+#
+# If watchdog library is unavailable or fails, automatically falls back to
+# periodic mode with 60-second intervals (no manual configuration needed).
+
+# Enable real-time monitoring for specific log sources
+# Set to false to disable monitoring for that source
+monitor_syslog = true
+monitor_mssql = true
+monitor_apache = true
+monitor_nginx = true
+
+# Alternative: Explicitly list custom files to monitor
+# Uncomment to override auto-detection from log paths
+# monitor_files = /var/log/auth.log, /custom/app.log
+
+# Debounce interval (seconds)
+# Batch rapid log writes within this window to reduce processing load
+# Default: 1.0 second (handles log bursts efficiently)
+debounce_interval = 1.0
+
+# Rate limiting for DoS protection
+# Maximum log events to process per second before triggering backoff
+# Prevents attackers from overwhelming the system by flooding logs
+max_events_per_second = 1000
+
+# Rate limit backoff duration (seconds)
+# If rate limit exceeded, pause real-time monitoring for this duration
+# System falls back to periodic mode during backoff
+rate_limit_backoff = 30
+
+# Fallback interval (seconds)
+# If real-time monitoring fails to start (missing inotify, permissions, etc),
+# automatically fall back to periodic polling at this interval
+# Default: 60 seconds (1 minute)
+fallback_interval = 60
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # [advanced] - Advanced Settings (Do Not Modify Unless You Know What You're Doing)
 # ═══════════════════════════════════════════════════════════════════════════
 [advanced]
