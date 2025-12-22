@@ -1,0 +1,140 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# NFTables/IPTables Parser Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Configuration for parsing firewall logs (nftables, iptables).
+#
+# This parser uses behavioral analysis instead of pattern matching:
+# - Tracks connection attempts per source IP
+# - Detects port scanning (multiple ports from same source)
+# - Detects network scanning (high frequency connection attempts)
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-22
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: nftables
+  version: 1.0.0
+  author: TribanFT Project
+  description: NFTables/IPTables firewall log parser for port and network scan detection
+  log_format: kernel_firewall
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Detection Thresholds (Configurable)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# These thresholds are loaded by the parser from the 'configuration' section below.
+# Adjust these values to tune detection sensitivity:
+#
+# PORT_SCAN Detection:
+#   - Default: 5+ different ports from same source IP
+#   - Rationale: Legitimate clients rarely connect to 5+ different ports
+#   - Decrease for stricter detection (e.g., 3 ports)
+#   - Increase for public servers with complex services (e.g., 7 ports)
+#
+# NETWORK_SCAN Detection:
+#   - Default: 10+ connection attempts from same source IP
+#   - Rationale: High frequency indicates automated scanning
+#   - Decrease for aggressive blocking (e.g., 5 attempts)
+#   - Increase for busy servers with legitimate traffic (e.g., 20 attempts)
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Log Line Recognition Patterns
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Firewall Log Identification                                         │
+  # └─────────────────────────────────────────────────────────────────────┘
+  log_format:
+    - name: nftables_log_line
+      regex: '\[nftables\]|nft:'
+      description: 'NFTables log marker'
+
+    - name: iptables_log_line
+      regex: '\[iptables\]|ipt:'
+      description: 'IPTables log marker'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Connection Field Extraction                                         │
+  # │ (Used for reference - actual parsing in Python code)                │
+  # └─────────────────────────────────────────────────────────────────────┘
+  connection_fields:
+    - name: source_ip
+      regex: 'SRC=([0-9a-fA-F\.:]+)'
+      description: 'Source IP address'
+
+    - name: dest_ip
+      regex: 'DST=([0-9a-fA-F\.:]+)'
+      description: 'Destination IP address'
+
+    - name: dest_port
+      regex: 'DPT=(\d+)'
+      description: 'Destination port'
+
+    - name: source_port
+      regex: 'SPT=(\d+)'
+      description: 'Source port'
+
+    - name: protocol
+      regex: 'PROTO=(\w+)'
+      description: 'Protocol (TCP/UDP/ICMP)'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Common Port Scan Targets (For Reference)                            │
+  # └─────────────────────────────────────────────────────────────────────┘
+  common_scan_patterns:
+    - name: sequential_ports
+      description: 'Sequential port scanning (e.g., 20, 21, 22, 23, 24)'
+      detection: 'Parser detects numerical patterns in port list'
+
+    - name: common_services
+      description: 'Common service ports (22, 80, 443, 3306, 3389, etc.)'
+      ports: [20, 21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 3306, 3389, 5432, 8080, 8443]
+
+    - name: high_ports
+      description: 'High port scanning (>1024)'
+      detection: 'Multiple ports above 1024 indicates service discovery'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Parser Behavior Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+
+configuration:
+  # Port scan detection threshold
+  port_scan_threshold: 5
+  port_scan_description: 'Number of unique ports required to classify as port scan'
+
+  # Network scan detection threshold
+  network_scan_threshold: 10
+  network_scan_description: 'Number of connection attempts required to classify as network scan'
+
+  # Time window for analysis (in minutes)
+  analysis_window_minutes: 60
+  analysis_window_description: 'Time window for correlating connection attempts'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# NFTables blocked connection:
+#   Jan 22 10:30:15 server kernel: [nftables] IN=eth0 OUT= SRC=1.2.3.4 DST=10.0.0.1 PROTO=TCP SPT=54321 DPT=22
+#
+# IPTables dropped packet:
+#   Jan 22 10:30:16 server kernel: [iptables] IN=eth0 OUT= SRC=1.2.3.4 DST=10.0.0.1 PROTO=TCP SPT=54322 DPT=23
+#
+# Port scan example (multiple lines from same IP):
+#   Jan 22 10:30:15 server kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=20
+#   Jan 22 10:30:15 server kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=21
+#   Jan 22 10:30:16 server kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=22
+#   Jan 22 10:30:16 server kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=23
+#   Jan 22 10:30:16 server kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=80
+#   → PORT_SCAN event generated (5 ports from 1.2.3.4)
+#
+# ═══════════════════════════════════════════════════════════════════════════

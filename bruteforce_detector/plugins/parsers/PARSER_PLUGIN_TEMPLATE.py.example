@@ -1,0 +1,268 @@
+"""
+Custom Parser Plugin Template
+
+Template for creating custom log parser plugins for TribanFT.
+
+Usage:
+1. Copy this file to a new name (e.g., nginx_parser.py)
+2. Update METADATA with your plugin information
+3. Implement the parse() method with your parsing logic
+4. Place in bruteforce_detector/plugins/parsers/
+5. Restart TribanFT - plugin will be auto-discovered
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
+import re
+import ipaddress
+import logging
+from typing import List, Optional
+from datetime import datetime
+from pathlib import Path
+
+from ...parsers.base import BaseLogParser
+from ...models import SecurityEvent, EventType
+
+
+class CustomParserTemplate(BaseLogParser):
+    """
+    Custom log parser template.
+
+    Replace this with your parser description.
+
+    Attributes:
+        log_format: Expected log format
+        event_patterns: Regex patterns for event extraction
+    """
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PLUGIN METADATA - REQUIRED
+    # ═══════════════════════════════════════════════════════════════════════
+    METADATA = {
+        # Plugin identifier
+        'name': 'custom_parser_template',
+
+        # Semantic version
+        'version': '1.0.0',
+
+        # Author/maintainer
+        'author': 'Your Name',
+
+        # Brief description
+        'description': 'Template for custom log parsing',
+
+        # Log format this parser handles
+        'log_format': 'custom',
+
+        # Enable by default?
+        'enabled_by_default': False  # Set to True when ready
+    }
+
+    def __init__(self, log_path: str, config=None):
+        """
+        Initialize custom parser.
+
+        Args:
+            log_path: Path to log file
+            config: Optional configuration object
+        """
+        super().__init__(log_path)
+
+        self.logger = logging.getLogger(__name__)
+        self.config = config
+
+        # ═══════════════════════════════════════════════════════════════════
+        # DEFINE REGEX PATTERNS
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Example patterns - customize for your log format
+        self.event_patterns = {
+            'failed_auth': re.compile(
+                r'(?P<timestamp>\S+ \S+).*'
+                r'authentication failure.*'
+                r'rhost=(?P<ip>[\d.]+)',
+                re.IGNORECASE
+            ),
+            'suspicious_request': re.compile(
+                r'(?P<timestamp>\S+ \S+).*'
+                r'(?P<ip>[\d.]+).*'
+                r'(?:union|select|drop|insert)',
+                re.IGNORECASE
+            )
+        }
+
+        # Timestamp format for your log
+        # Examples:
+        # - "%Y-%m-%d %H:%M:%S" for "2024-01-15 14:30:00"
+        # - "%b %d %H:%M:%S" for "Jan 15 14:30:00"
+        # - "%d/%b/%Y:%H:%M:%S %z" for "15/Jan/2024:14:30:00 +0000"
+        self.timestamp_format = "%b %d %H:%M:%S"
+
+        self.logger.info(
+            f"Initialized custom parser for {log_path}"
+        )
+
+    def parse(
+        self,
+        since_timestamp: Optional[datetime] = None,
+        max_lines: Optional[int] = None
+    ) -> List[SecurityEvent]:
+        """
+        Parse log file and extract security events.
+
+        Implement your custom parsing logic here.
+
+        Args:
+            since_timestamp: Only return events after this time
+            max_lines: Maximum lines to process
+
+        Returns:
+            List of SecurityEvent objects
+        """
+        events = []
+        lines_processed = 0
+
+        self.logger.debug(f"Parsing log file: {self.log_path}")
+
+        # ═══════════════════════════════════════════════════════════════════
+        # READ AND PARSE LOG LINES
+        # ═══════════════════════════════════════════════════════════════════
+
+        for line in self.read_lines():
+            # Check max_lines limit
+            if max_lines and lines_processed >= max_lines:
+                break
+
+            lines_processed += 1
+
+            # Try each pattern
+            for pattern_name, pattern in self.event_patterns.items():
+                match = pattern.search(line)
+
+                if match:
+                    event = self._create_event_from_match(
+                        match, line, pattern_name
+                    )
+
+                    if event:
+                        # Check timestamp filter
+                        if since_timestamp and event.timestamp < since_timestamp:
+                            continue
+
+                        events.append(event)
+
+        self.logger.info(
+            f"Parsed {len(events)} events from {lines_processed} lines"
+        )
+
+        return events
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # HELPER METHODS
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _create_event_from_match(
+        self,
+        match: re.Match,
+        raw_line: str,
+        pattern_name: str
+    ) -> Optional[SecurityEvent]:
+        """
+        Create SecurityEvent from regex match.
+
+        Args:
+            match: Regex match object
+            raw_line: Original log line
+            pattern_name: Name of matched pattern
+
+        Returns:
+            SecurityEvent object or None if invalid
+        """
+        try:
+            # Extract IP address
+            ip_str = match.group('ip')
+            source_ip = ipaddress.ip_address(ip_str)
+
+            # Parse timestamp
+            timestamp_str = match.group('timestamp')
+            timestamp = self._parse_timestamp(timestamp_str)
+
+            # Map pattern to EventType
+            event_type = self._map_pattern_to_event_type(pattern_name)
+
+            # Create SecurityEvent
+            event = SecurityEvent(
+                source_ip=source_ip,
+                event_type=event_type,
+                timestamp=timestamp,
+                source='custom_parser',
+                raw_message=raw_line
+            )
+
+            return event
+
+        except Exception as e:
+            self.logger.debug(f"Failed to create event from line: {e}")
+            return None
+
+    def _parse_timestamp(self, timestamp_str: str) -> datetime:
+        """
+        Parse timestamp from log line.
+
+        Args:
+            timestamp_str: Timestamp string from log
+
+        Returns:
+            datetime object
+        """
+        try:
+            # Parse timestamp using defined format
+            dt = datetime.strptime(timestamp_str, self.timestamp_format)
+
+            # If format doesn't include year, add current year
+            if dt.year == 1900:
+                dt = dt.replace(year=datetime.now().year)
+
+            return dt
+
+        except ValueError:
+            # Fallback to current time if parsing fails
+            self.logger.warning(
+                f"Failed to parse timestamp: {timestamp_str}, using current time"
+            )
+            return datetime.now()
+
+    def _map_pattern_to_event_type(self, pattern_name: str) -> EventType:
+        """
+        Map pattern name to EventType enum.
+
+        Args:
+            pattern_name: Name of matched pattern
+
+        Returns:
+            EventType enum value
+        """
+        # Define mapping for your patterns
+        mapping = {
+            'failed_auth': EventType.FAILED_LOGIN,
+            'suspicious_request': EventType.PORT_SCAN,
+            # Add more mappings as needed
+        }
+
+        return mapping.get(pattern_name, EventType.FAILED_LOGIN)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIGURATION EXAMPLE
+# ═══════════════════════════════════════════════════════════════════════════
+"""
+Add to config.conf to use this parser:
+
+[parser:custom]
+enabled = true
+log_path = /var/log/custom/app.log
+
+Then enable the plugin by setting in config.conf:
+enable_custom_parser_template_plugin = true
+"""

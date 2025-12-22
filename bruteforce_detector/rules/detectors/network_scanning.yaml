@@ -1,0 +1,264 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Network and Port Scanning Detection Rules
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Detects reconnaissance activities including:
+# - Port scanning (probing multiple ports)
+# - Network scanning (high frequency connection attempts)
+#
+# These detectors work with firewall logs (nftables, iptables).
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-22
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Multiple detectors in single file
+detectors:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Port Scan Detection                                                 │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: port_scan_detector
+      version: 1.0.0
+      description: Detects port scanning activity from firewall logs
+      enabled: true
+      priority: high
+
+    log_sources:
+      parsers:
+        - nftables
+        - iptables
+
+    detection:
+      event_types:
+        - PORT_SCAN
+
+      # Port scans are pre-aggregated by parser
+      # Threshold of 1 means "block on first port scan detection"
+      threshold: 1
+      time_window_minutes: 60
+      confidence: high
+
+      # NOTE: Parser generates PORT_SCAN events when it detects 5+ ports scanned
+      # No additional patterns needed - parser does behavioral analysis
+
+      patterns: []  # No regex patterns (behavioral detection in parser)
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Port scan detected: {event_count} scan(s) from {ip}"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Network Scan Detection                                              │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: network_scan_detector
+      version: 1.0.0
+      description: Detects network reconnaissance and scanning activity
+      enabled: true
+      priority: high
+
+    log_sources:
+      parsers:
+        - nftables
+        - iptables
+
+    detection:
+      event_types:
+        - NETWORK_SCAN
+
+      # Network scans are pre-aggregated by parser
+      # Threshold of 1 means "block on first network scan detection"
+      threshold: 1
+      time_window_minutes: 60
+      confidence: high
+
+      # NOTE: Parser generates NETWORK_SCAN events when it detects 10+ connection attempts
+      # No additional patterns needed - parser does behavioral analysis
+
+      patterns: []  # No regex patterns (behavioral detection in parser)
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Network scan detected: {event_count} scan(s) from {ip}"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Combined Reconnaissance Detection (Port + Network Scan)             │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: combined_scan_detector
+      version: 1.0.0
+      description: Detects any type of scanning activity (port or network)
+      enabled: true
+      priority: medium
+
+    log_sources:
+      parsers:
+        - nftables
+        - iptables
+
+    detection:
+      event_types:
+        - PORT_SCAN
+        - NETWORK_SCAN
+
+      # Trigger if either port scan OR network scan detected
+      threshold: 1
+      time_window_minutes: 120  # Longer window for correlation
+      confidence: medium
+
+      patterns: []  # No regex patterns (behavioral detection in parser)
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Scanning activity detected: {event_count} scan event(s) from {ip}"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Detection Logic Explanation
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# How Port Scan Detection Works:
+# 1. NFTables parser reads firewall logs
+# 2. Parser tracks connection attempts per source IP
+# 3. When IP connects to N+ different ports → PORT_SCAN event generated
+#    (N is configured in bruteforce_detector/rules/parsers/nftables.yaml)
+#    (Default: port_scan_threshold = 5)
+# 4. This detector receives PORT_SCAN event
+# 5. With threshold=1, first PORT_SCAN event triggers blacklist
+#
+# How Network Scan Detection Works:
+# 1. NFTables parser reads firewall logs
+# 2. Parser tracks total connection attempts per source IP
+# 3. When IP makes M+ connection attempts → NETWORK_SCAN event generated
+#    (M is configured in bruteforce_detector/rules/parsers/nftables.yaml)
+#    (Default: network_scan_threshold = 10)
+# 4. This detector receives NETWORK_SCAN event
+# 5. With threshold=1, first NETWORK_SCAN event triggers blacklist
+#
+# Configuration Hierarchy:
+# ┌──────────────────────────────────────────────────────────────────┐
+# │ Parser Level (nftables.yaml):                                    │
+# │   port_scan_threshold: 5      ← How many ports = PORT_SCAN       │
+# │   network_scan_threshold: 10  ← How many attempts = NETWORK_SCAN │
+# └──────────────────────────────────────────────────────────────────┘
+#                             ↓
+# ┌──────────────────────────────────────────────────────────────────┐
+# │ Detector Level (network_scanning.yaml):                          │
+# │   threshold: 1                ← How many events = blacklist      │
+# │   time_window_minutes: 60     ← Deduplication window             │
+# └──────────────────────────────────────────────────────────────────┘
+#
+# Why threshold=1?
+# - Parser already did aggregation (5 ports = 1 PORT_SCAN event)
+# - Detector threshold applies to these pre-aggregated events
+# - threshold=1 = "block immediately when scan detected"
+# - threshold=2 = "block only if IP scans twice"
+#
+# To change port scan sensitivity:
+# - Edit bruteforce_detector/rules/parsers/nftables.yaml
+# - Change port_scan_threshold (e.g., 3 for stricter, 7 for lenient)
+# - Restart tribanft service: sudo systemctl restart tribanft
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Configuration Recommendations
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Conservative (fewer false positives):
+#   port_scan_detector:
+#     threshold: 2  # Require 2 separate scan incidents
+#     time_window_minutes: 120
+#
+# Aggressive (maximum protection):
+#   port_scan_detector:
+#     threshold: 1  # Block on first scan
+#     time_window_minutes: 60
+#
+# For DMZ / Public-Facing Servers:
+#   - Use threshold: 1 (immediate blocking)
+#   - Internet-facing servers expect constant scanning
+#   - Blocking aggressive scanners reduces attack surface
+#
+# For Internal Networks:
+#   - Use threshold: 2 (allow some legitimate service discovery)
+#   - Internal tools may trigger false positives (Nmap, vulnerability scanners)
+#   - Whitelist legitimate security scanners by IP
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Whitelisting Legitimate Scanners
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# To whitelist legitimate security scanners, add to your main config:
+#
+# whitelist:
+#   - 192.168.1.100  # Internal vulnerability scanner
+#   - 10.0.0.50      # Security team Nmap host
+#
+# Or disable these detectors during scheduled scans:
+#
+# 1. Before scan:
+#    tribanft --disable-detector port_scan_detector
+#
+# 2. Run your scan:
+#    nmap -p- target.example.com
+#
+# 3. After scan:
+#    tribanft --enable-detector port_scan_detector
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Firewall Log Scenarios
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Scenario 1: Port Scan (Nmap SYN scan)
+# ───────────────────────────────────────
+# Attacker runs: nmap -sS -p- target.example.com
+#
+# Firewall logs:
+#   Jan 22 10:30:15 kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=20
+#   Jan 22 10:30:15 kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=21
+#   Jan 22 10:30:15 kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=22
+#   Jan 22 10:30:16 kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=23
+#   Jan 22 10:30:16 kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=80
+#
+# Parser detects: 5 unique ports (20, 21, 22, 23, 80)
+# Event generated: PORT_SCAN
+# Detector action: Block 1.2.3.4
+#
+# Scenario 2: Network Scan (Fast connection attempts)
+# ────────────────────────────────────────────────────
+# Attacker runs: masscan -p80 10.0.0.0/24
+#
+# Firewall logs (12 connection attempts in short time):
+#   Jan 22 10:30:15 kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.1 DPT=80
+#   Jan 22 10:30:15 kernel: [nftables] SRC=1.2.3.4 DST=10.0.0.2 DPT=80
+#   ... (10 more attempts)
+#
+# Parser detects: 12 connection attempts
+# Event generated: NETWORK_SCAN
+# Detector action: Block 1.2.3.4
+#
+# Scenario 3: Legitimate Service (No Block)
+# ──────────────────────────────────────────
+# Normal web traffic:
+#   Jan 22 10:30:15 kernel: [nftables] SRC=5.6.7.8 DST=10.0.0.1 DPT=443
+#   Jan 22 10:30:16 kernel: [nftables] SRC=5.6.7.8 DST=10.0.0.1 DPT=443
+#   Jan 22 10:30:17 kernel: [nftables] SRC=5.6.7.8 DST=10.0.0.1 DPT=443
+#
+# Parser detects: Only 1 unique port, only 3 attempts
+# Event generated: None (below thresholds)
+# Detector action: No action
+#
+# ═══════════════════════════════════════════════════════════════════════════
