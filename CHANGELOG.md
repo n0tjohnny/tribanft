@@ -86,32 +86,6 @@ Major architectural upgrade: real-time log monitoring with inotify/kqueue instea
 ### Dependencies
 - **Added**: `watchdog>=3.0.0` (optional, falls back to periodic if missing)
 
-### Migration Guide
-
-**For existing cron-based setups:**
-
-1. Run migration assistant:
-   ```bash
-   tribanft --migrate
-   ```
-
-2. Or manually:
-   ```bash
-   # Disable cron
-   sudo rm /etc/cron.d/tribanft
-   crontab -e  # Remove tribanft entries
-
-   # Install systemd service
-   sudo cp systemd/tribanft.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable tribanft
-   sudo systemctl start tribanft
-
-   # Verify
-   sudo systemctl status tribanft
-   sudo journalctl -u tribanft -f
-   ```
-
 3. Install watchdog (optional, but recommended):
    ```bash
    pip install watchdog>=3.0.0
