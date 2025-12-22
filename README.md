@@ -13,7 +13,7 @@
   <strong>Threat Intelligence &amp; Brute Force Advanced Network Firewall Technology (T.I.B.F.A.N.F.T) </strong>
 </p>
 <p align="center">
-  ...but i thought <strong>TRIBANFT</strong> suites much better!
+  ...but i thought <strong>TRIBANFT</strong> suits much better!
 </p>
 
 **TribanFT is a Multi-layer security platform** that detects sophisticated attacks across network (L3/L4) and application (L7) layers, enriches threat data with actionable intelligence, and unifies CrowdSec, NFTables, and Fail2Ban into a single detection engine.
