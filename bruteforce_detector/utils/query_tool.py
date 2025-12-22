@@ -82,7 +82,7 @@ class QueryTool:
         if event_types:
             print(f"  Event Types:     {', '.join(event_types)}")
 
-        print(f"\n📅 Timestamps:")
+        print(f"\nTimestamps:")
         if row[9]:
             first_seen = datetime.fromisoformat(row[9])
             print(f"  First Seen:      {first_seen.strftime('%Y-%m-%d %H:%M:%S')}")
