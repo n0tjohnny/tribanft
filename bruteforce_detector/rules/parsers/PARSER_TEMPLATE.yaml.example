@@ -1,0 +1,193 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Parser Pattern Template
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# This is a template for creating custom parser pattern definitions.
+# Copy this file and rename it to match your parser's metadata name.
+#
+# Example: If metadata.name is "custom_parser", save as "custom_parser.yaml"
+#
+# Author: Your Name
+# License: GNU GPL v3
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Metadata Section
+# ═══════════════════════════════════════════════════════════════════════════
+metadata:
+  # Parser identifier - must match the 'name' field in parser's METADATA dict
+  name: custom_parser
+
+  # Semantic version
+  version: 1.0.0
+
+  # Author/maintainer
+  author: Your Name or Team
+
+  # Description of what this parser does
+  description: Custom log file parser for [describe your log format]
+
+  # Log format identifier (informational)
+  log_format: custom_format
+
+  # Enable this parser by default
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Groups
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Organize patterns into logical groups. Each group can be loaded separately
+# by the parser using: self._get_compiled_patterns('group_name')
+#
+# Pattern group names are arbitrary - choose names that make sense for your
+# log format and the types of events you're detecting.
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example Group: Log Format Parsing                                   │
+  # │ Used to parse the structure of log lines                            │
+  # └─────────────────────────────────────────────────────────────────────┘
+  log_format:
+    - name: main_log_pattern
+      # Regex with named capture groups for field extraction
+      regex: '^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<level>\w+)\s+(?P<message>.*)'
+      description: Main log line format
+
+    - name: alternate_format
+      regex: '^\[(?P<timestamp>[^\]]+)\]\s+(?P<severity>\w+):\s+(?P<message>.*)'
+      description: Alternate log line format
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example Group: Attack Detection Patterns                            │
+  # │ Used to detect specific attack types or security events             │
+  # └─────────────────────────────────────────────────────────────────────┘
+  attack_detection:
+    - regex: '(?i).*(malicious|attack|exploit).*'
+      description: 'Generic attack keyword detection'
+
+    - regex: '(?i).*authentication\s+failed.*from\s+([0-9a-fA-F\.:]+)'
+      description: 'Authentication failure with IP'
+
+    - regex: '(?i).*unauthorized\s+access.*'
+      description: 'Unauthorized access attempt'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example Group: Error Patterns                                       │
+  # │ Used to detect error conditions                                     │
+  # └─────────────────────────────────────────────────────────────────────┘
+  errors:
+    - regex: '(?i).*error.*code\s+(\d+)'
+      description: 'Error with error code'
+
+    - regex: '(?i).*exception.*'
+      description: 'Exception logged'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Syntax Reference
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Each pattern supports the following fields:
+#
+# - regex: (REQUIRED) Regular expression pattern to match
+#   - Use raw strings to avoid escaping issues
+#   - Named groups (?P<name>...) can be used for field extraction
+#   - Use (?i) for case-insensitive matching
+#
+# - name: (OPTIONAL) Identifier for this specific pattern
+#   - Used for logging and debugging
+#   - Not required for pattern matching
+#
+# - description: (REQUIRED) Human-readable explanation
+#   - Returned with the compiled pattern
+#   - Used in logging and debugging
+#   - Should be concise (1-3 words)
+#
+# Additional fields (optional, for future enhancements):
+# - event_type: EventType enum value
+# - severity: critical|high|medium|low
+# - flags: [IGNORECASE, MULTILINE, DOTALL]  (future feature)
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Using Patterns in Parser Code
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# In your Python parser class, load patterns like this:
+#
+# class CustomParser(BaseLogParser):
+#     METADATA = {
+#         'name': 'custom_parser',  # Must match metadata.name above
+#         'version': '1.0.0',
+#         ...
+#     }
+#
+#     def _parse_line(self, line: str):
+#         # Load compiled patterns for a specific group
+#         attack_patterns = self._get_compiled_patterns('attack_detection')
+#
+#         # attack_patterns is a list of tuples: [(compiled_regex, description), ...]
+#         for pattern, description in attack_patterns:
+#             match = pattern.search(line)
+#             if match:
+#                 self.logger.debug(f"Matched: {description}")
+#                 # Extract groups if using named capture groups
+#                 if match.groups():
+#                     ip = match.group(1)
+#                 # Create SecurityEvent...
+#                 break
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Include example log lines that your patterns should match:
+#
+# 1. Valid log line:
+#    2025-01-20 14:30:00 INFO User logged in successfully
+#
+# 2. Attack detected:
+#    2025-01-20 14:31:00 WARNING Authentication failed from 1.2.3.4
+#
+# 3. Error condition:
+#    2025-01-20 14:32:00 ERROR Database connection failed: code 1045
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Best Practices
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. Group Related Patterns:
+#    - Organize patterns by purpose (format, attacks, errors, etc.)
+#    - Each group should have a clear, descriptive name
+#
+# 2. Use Anchors Wisely:
+#    - Use ^ and $ for full line matches
+#    - Avoid .* at the start of patterns when possible (performance)
+#
+# 3. Named Capture Groups:
+#    - Use (?P<name>...) for extracting fields
+#    - Makes code more readable and maintainable
+#
+# 4. Case Sensitivity:
+#    - Use (?i) prefix for case-insensitive matching
+#    - Most security events should be case-insensitive
+#
+# 5. Performance:
+#    - Patterns are pre-compiled once at startup
+#    - More patterns = slower parsing, but usually negligible
+#    - Test with realistic log volumes
+#
+# 6. Testing:
+#    - Include example log lines that match each pattern
+#    - Test edge cases and variations
+#    - Validate YAML syntax: python3 -c "import yaml; yaml.safe_load(open('your_file.yaml'))"
+#
+# ═══════════════════════════════════════════════════════════════════════════

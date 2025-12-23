@@ -1,0 +1,228 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Apache/Nginx Parser Pattern Definitions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Patterns for parsing Apache/Nginx combined log format and detecting attacks.
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-21
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: apache
+  version: 1.0.0
+  author: TribanFT Project
+  description: Apache/Nginx combined log format parser patterns
+  log_format: apache_combined
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Groups
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Log Format Pattern (for parsing log lines)                          │
+  # └─────────────────────────────────────────────────────────────────────┘
+  log_format:
+    - name: combined_log_pattern
+      regex: '^(?P<ip>[0-9a-fA-F\.:]+)\s+(?P<ident>\S+)\s+(?P<user>\S+)\s+\[(?P<timestamp>[^\]]+)\]\s+"(?P<method>\S+)\s+(?P<uri>[^\s]+)\s+(?P<protocol>[^"]+)"\s+(?P<status>\d+)\s+(?P<size>\S+)\s+"(?P<referer>[^"]*)"\s+"(?P<user_agent>[^"]*)"'
+      description: Apache/Nginx combined log format
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ SQL Injection Patterns                                              │
+  # └─────────────────────────────────────────────────────────────────────┘
+  sql_injection:
+    - regex: '(?i)\bunion\s+(all\s+)?select'
+      description: 'UNION-based SQL injection'
+
+    - regex: "(?i)(?:where|and|or)\\s+['\"]?\\d+['\"]?\\s*[=<>!]+\\s*['\"]?\\d+['\"]?(?:\\s*--|\\s*#|\\s*/\\*|;|$)"
+      description: 'Boolean-based injection with SQL context'
+
+    - regex: "(?i)(?:and|or)\\s+['\"]?1['\"]?\\s*=\\s*['\"]?1['\"]?\\s*(?:--|#|/\\*)"
+      description: 'Boolean tautology with SQL comment'
+
+    - regex: "(?i).*\\bwaitfor\\s+delay\\s+['\"]"
+      description: 'Time-based blind injection (WAITFOR)'
+
+    - regex: '(?i).*\bbenchmark\s*\('
+      description: 'Time-based blind injection (BENCHMARK)'
+
+    - regex: '(?i).*\bsleep\s*\(\s*\d+\s*\)'
+      description: 'Time-based blind injection (SLEEP)'
+
+    - regex: '(?i).*\bconvert\s*\(.*\busing\s+'
+      description: 'Error-based injection (CONVERT)'
+
+    - regex: '(?i).*\bcast\s*\(.*\bas\s+'
+      description: 'Error-based injection (CAST)'
+
+    - regex: '(?i);[\s\n]*(?:drop|insert|update|delete|exec|execute|alter|create)\s+(?:table|database|user|procedure)'
+      description: 'Stacked query injection'
+
+    - regex: '(?i)(?:/\*|\*/|--|#)[^\n]*\b(select|union|insert|drop|exec)'
+      description: 'Comment-based SQL injection'
+
+    - regex: '(?i)\binformation_schema\b\.(?:tables|columns|schemata)'
+      description: 'Information schema enumeration'
+
+    - regex: '(?i).*\bxp_cmdshell\b'
+      description: 'xp_cmdshell exploitation'
+
+    - regex: '(?i).*\bsp_executesql\b'
+      description: 'sp_executesql exploitation'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ WordPress Attack Patterns                                           │
+  # └─────────────────────────────────────────────────────────────────────┘
+  wordpress:
+    - regex: '(?i)/wp-login\.php'
+      description: 'wp-login.php access'
+
+    - regex: '(?i)/wp-admin/'
+      description: 'wp-admin access'
+
+    - regex: '(?i)POST.*wp-login.*log=.*pwd='
+      description: 'wp-login POST attempt'
+
+    - regex: '(?i)POST.*/xmlrpc\.php'
+      description: 'XML-RPC POST request'
+
+    - regex: '(?i)/xmlrpc\.php.*system\.multicall'
+      description: 'XML-RPC multicall'
+
+    - regex: '(?i)/xmlrpc\.php.*wp\.getUsersBlogs'
+      description: 'XML-RPC getUsersBlogs'
+
+    - regex: '(?i)/wp-content/plugins/.*(timthumb|revslider|revolution)'
+      description: 'Vulnerable plugin scan'
+
+    - regex: '(?i)/wp-content/plugins/.*readme\.txt'
+      description: 'Plugin enumeration (readme.txt)'
+
+    - regex: '(?i)/wp-content/themes/.*style\.css'
+      description: 'Theme enumeration (style.css)'
+
+    - regex: '(?i)/wp-content/uploads/.*\.php'
+      description: 'Malicious file upload attempt'
+
+    - regex: '(?i)/wp-config\.php\.(bak|backup|old|~)'
+      description: 'wp-config backup scan'
+
+    - regex: '(?i)/wp-json/wp/v2/users'
+      description: 'REST API user enumeration'
+
+    - regex: '(?i)\?author=\d+'
+      description: 'Author enumeration'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Login Page Patterns (for failed login detection)                    │
+  # └─────────────────────────────────────────────────────────────────────┘
+  login_pages:
+    - regex: '(?i)/wp-login\.php'
+      description: 'WordPress login'
+
+    - regex: '(?i)/wp-admin'
+      description: 'WordPress admin'
+
+    - regex: '(?i)/login'
+      description: 'Generic login'
+
+    - regex: '(?i)/admin'
+      description: 'Admin panel'
+
+    - regex: '(?i)/auth'
+      description: 'Authentication endpoint'
+
+    - regex: '(?i)/signin'
+      description: 'Sign-in page'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ XSS Attack Patterns                                                 │
+  # └─────────────────────────────────────────────────────────────────────┘
+  xss_attack:
+    - regex: '(?i)<script[^>]*>.*?</script>'
+      description: 'Inline script tag injection'
+
+    - regex: '(?i)javascript:[^\s"'']*'
+      description: 'JavaScript protocol handler'
+
+    - regex: '(?i)on(?:load|error|click|mouse\w+)\s*='
+      description: 'Event handler injection'
+
+    - regex: '(?i)(?:<iframe|<object|<embed)[^>]*src\s*='
+      description: 'Embedded content injection'
+
+    - regex: '(?i)<img[^>]*src\s*=\s*[''"]?javascript:'
+      description: 'Image tag XSS'
+
+    - regex: '(?i)(?:alert|confirm|prompt)\s*\('
+      description: 'JavaScript dialog injection'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Path Traversal Patterns                                             │
+  # └─────────────────────────────────────────────────────────────────────┘
+  path_traversal:
+    - regex: '(?i)(?:\.\./|\.\.\\){2,}'
+      description: 'Directory traversal sequence'
+
+    - regex: '(?i)(?:/etc/passwd|/etc/shadow|/etc/hosts|c:\\windows\\system32)'
+      description: 'Sensitive file access attempt'
+
+    - regex: '(?i)(?:file://|php://(?:filter|input|stdin|output)|expect://|zip://)'
+      description: 'Protocol wrapper exploitation'
+
+    - regex: '(?i)\.\.(?:%2f|%5c|%252f|%255c)'
+      description: 'URL-encoded traversal attempt'
+
+    - regex: '(?i)/\.\.;/'
+      description: 'Path traversal with separator bypass'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Command Injection Patterns                                          │
+  # └─────────────────────────────────────────────────────────────────────┘
+  command_injection:
+    - regex: '(?i)(?:;|\||&&|`|\$\()\s*(?:rm|wget|curl|bash|sh|python|perl|nc|netcat|cat|ls|id|whoami|uname)\b'
+      description: 'Shell command injection'
+
+    - regex: '(?i)%0[ad](?:cat|ls|id|whoami|uname|wget|curl)'
+      description: 'URL-encoded command injection'
+
+    - regex: '(?i)(?:&&|\|\|)\s*(?:cat|type)\s+(?:/etc/|c:\\)'
+      description: 'Chained command with file read'
+
+    - regex: '(?i)(?:`|\$\(|\$\{).*(?:ls|cat|id|whoami|pwd)'
+      description: 'Command substitution injection'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Malicious File Upload Patterns                                      │
+  # └─────────────────────────────────────────────────────────────────────┘
+  file_upload:
+    - regex: '(?i)/upload.*\.(?:php|phtml|php3|php4|php5|phar|exe|sh|pl|py|jsp|asp|aspx)(?:\?|$|&)'
+      description: 'Executable file upload attempt'
+
+    - regex: '(?i)Content-Type:\s*(?:text/x-php|application/x-httpd-php)'
+      description: 'Malicious content-type in upload'
+
+    - regex: '(?i)/(?:upload|file|media)/.*\.(?:svg|xml).*<script'
+      description: 'SVG/XML with embedded script'
+
+    - regex: '(?i)\.(?:jpg|png|gif|pdf)\.(?:php|jsp|asp)'
+      description: 'Double extension upload'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Combined log format:
+#   1.2.3.4 - - [20/Jan/2025:14:30:00 +0000] "GET /path HTTP/1.1" 200 1234 "referer" "user-agent"
+#
+# SQL injection:
+#   1.2.3.4 - - [20/Jan/2025:14:30:00] "GET /api?id=1' union select * from users-- HTTP/1.1" 200
+#
+# WordPress attack:
+#   1.2.3.4 - - [20/Jan/2025:14:31:00] "POST /wp-login.php" 401 1234
+#
+# ═══════════════════════════════════════════════════════════════════════════

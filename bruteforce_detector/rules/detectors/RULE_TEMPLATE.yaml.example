@@ -1,0 +1,180 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Custom Detection Rule Template
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Template for creating custom YAML-based detection rules.
+#
+# USAGE:
+# 1. Copy this file to a new name (e.g., my_custom_rule.yaml)
+# 2. Update metadata section with your rule information
+# 3. Define patterns to match in detection section
+# 4. Set threshold and time window
+# 5. Customize output reason template
+# 6. Save in bruteforce_detector/rules/detectors/ directory
+# 7. Restart TribanFT - rule will be auto-loaded
+#
+# Author: Your Name
+# License: GNU GPL v3
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ METADATA - Rule Information                                          │
+# └───────────────────────────────────────────────────────────────────────┘
+metadata:
+  # Unique rule identifier (lowercase, underscores)
+  name: custom_rule_template
+
+  # Semantic version (MAJOR.MINOR.PATCH)
+  version: 1.0.0
+
+  # Author/maintainer name
+  author: Your Name
+
+  # Brief description of what this rule detects
+  description: Template for custom detection rules
+
+  # Enable/disable this rule
+  enabled: false  # Set to true when ready to use
+
+  # Rule priority (affects execution order)
+  # Options: critical, high, medium, low
+  priority: medium
+
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ DETECTION - Detection Logic                                          │
+# └───────────────────────────────────────────────────────────────────────┘
+detection:
+  # Event types to analyze
+  # Options: PRELOGIN_INVALID, FAILED_LOGIN, PORT_SCAN, CROWDSEC_BLOCK
+  # Tip: Use FAILED_LOGIN for authentication attacks, PORT_SCAN for reconnaissance
+  event_types:
+    - FAILED_LOGIN
+
+  # Minimum number of matching events required to trigger detection
+  # Lower = more sensitive (more false positives)
+  # Higher = less sensitive (may miss attacks)
+  threshold: 10
+
+  # Time window in minutes for event aggregation
+  # Events within this window are grouped together
+  # Shorter = detect fast attacks, Longer = detect slow/distributed attacks
+  time_window_minutes: 60
+
+  # Confidence level of this detection
+  # Options: high, medium, low
+  # Affects blacklist priority and alerting
+  confidence: medium
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Patterns - Regex patterns to match against log lines               │
+  # │ Events matching ANY pattern will be counted toward threshold       │
+  # └─────────────────────────────────────────────────────────────────────┘
+  patterns:
+    # Pattern 1: Basic regex match
+    - regex: "(?i).*your.*pattern.*here.*"
+      description: "Description of what this pattern matches"
+      severity: high  # Optional: critical, high, medium, low
+
+    # Pattern 2: With regex flags
+    - regex: "case.*sensitive.*pattern"
+      description: "Case-sensitive pattern"
+      flags: []  # Options: IGNORECASE, MULTILINE, DOTALL
+
+    # Pattern 3: Example - failed SSH login
+    - regex: "(?i).*sshd.*failed.*password.*"
+      description: "SSH authentication failure"
+      severity: medium
+
+    # Pattern 4: Example - HTTP attack
+    - regex: "(?i).*GET.*/etc/passwd.*"
+      description: "Path traversal attempt"
+      severity: critical
+
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ AGGREGATION - How to group matching events                           │
+# └───────────────────────────────────────────────────────────────────────┘
+aggregation:
+  # Group events by this field
+  # Options:
+  #   - source_ip: Group by attacker IP (most common)
+  #   - event_type: Group by attack type
+  #   - source: Group by log source
+  group_by: source_ip
+
+  # Condition for triggering detection (for future use)
+  # Currently only count >= threshold is supported
+  condition: count >= threshold
+
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ OUTPUT - Detection result formatting                                 │
+# └───────────────────────────────────────────────────────────────────────┘
+output:
+  # Reason template shown in blacklist/logs
+  # Available variables:
+  #   {rule_name} - Name of this rule
+  #   {event_count} - Number of events matched
+  #   {pattern_description} - Description from matched pattern
+  #   {ip} - Source IP address
+  #   {threshold} - Configured threshold value
+  reason_template: "Custom attack detected: {pattern_description} - {event_count} events from {ip}"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PATTERN WRITING TIPS
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. Use (?i) at start for case-insensitive matching
+#    Example: (?i).*failed.*login.*
+#
+# 2. Use .* to match any characters
+#    Example: .*error.*from.*1\.2\.3\.4
+#
+# 3. Use \b for word boundaries
+#    Example: \berror\b matches "error" but not "errors"
+#
+# 4. Use (pattern1|pattern2) for alternatives
+#    Example: .*(union|select|drop).*
+#
+# 5. Escape special characters with backslash
+#    Special chars: . * + ? ^ $ ( ) [ ] { } | \
+#    Example: /wp-login\.php (dot is literal)
+#
+# 6. Test patterns at regex101.com before deployment
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EXAMPLE LOG LINES TO TEST AGAINST
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Add example log lines that should match your patterns here.
+# This helps with testing and documentation.
+#
+# Example 1:
+#   Nov 23 14:12:51 server sshd[12345]: Failed password for admin from 1.2.3.4
+#
+# Example 2:
+#   2025-01-20 10:30:15 HTTP GET /admin.php?id=1' OR '1'='1 from 1.2.3.4
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MULTI-RULE FORMAT (OPTIONAL)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# You can define multiple related rules in a single file:
+#
+# detectors:
+#   - metadata:
+#       name: rule_one
+#       ...
+#     detection:
+#       ...
+#
+#   - metadata:
+#       name: rule_two
+#       ...
+#     detection:
+#       ...
+#
+# ═══════════════════════════════════════════════════════════════════════════

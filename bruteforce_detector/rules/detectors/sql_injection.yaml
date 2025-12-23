@@ -1,0 +1,161 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# SQL Injection Detection Rule
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Detects SQL injection attempts in log files.
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-01-20
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  # Rule identifier (unique)
+  name: sql_injection_detector
+
+  # Semantic version
+  version: 1.0.0
+
+  # Author/maintainer
+  author: TribanFT Project
+
+  # Description
+  description: Detects SQL injection attempts in authentication and request logs
+
+  # Enable this rule
+  enabled: true
+
+  # Rule priority (high = run first)
+  priority: high
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Log Sources
+# ═══════════════════════════════════════════════════════════════════════════
+log_sources:
+  # Only analyze events from these parsers
+  parsers:
+    - apache
+    - nginx
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Detection Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+detection:
+  # Event types to analyze
+  event_types:
+    - SQL_INJECTION
+    - HTTP_REQUEST
+
+  # Minimum events required to trigger detection
+  threshold: 5
+
+  # Time window in minutes for event aggregation
+  time_window_minutes: 60
+
+  # Confidence level of detection
+  # Options: high, medium, low
+  confidence: high
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Regex Patterns                                                      │
+  # │ Events matching ANY pattern will be counted                        │
+  # └─────────────────────────────────────────────────────────────────────┘
+  patterns:
+    # UNION-based SQL injection
+    - regex: "(?i).*\\bunion\\s+(all\\s+)?select.*"
+      description: "UNION-based SQL injection"
+      severity: critical
+
+    # Boolean-based blind injection
+    - regex: "(?i).*\\bor\\s+['\"]?1['\"]?\\s*=\\s*['\"]?1.*"
+      description: "Boolean-based blind injection"
+      severity: critical
+
+    - regex: "(?i).*\\band\\s+['\"]?1['\"]?\\s*=\\s*['\"]?1.*"
+      description: "Boolean-based blind injection (AND)"
+      severity: critical
+
+    # Time-based blind injection
+    - regex: "(?i).*\\bwaitfor\\s+delay\\s+['\"].*"
+      description: "Time-based blind injection (WAITFOR)"
+      severity: critical
+
+    - regex: "(?i).*\\bbenchmark\\s*\\(.*"
+      description: "Time-based blind injection (BENCHMARK)"
+      severity: critical
+
+    - regex: "(?i).*\\bsleep\\s*\\(\\s*\\d+\\s*\\).*"
+      description: "Time-based blind injection (SLEEP)"
+      severity: critical
+
+    # Error-based injection
+    - regex: "(?i).*\\bconvert\\s*\\(.*\\busing\\s+.*"
+      description: "Error-based injection (CONVERT)"
+      severity: high
+
+    - regex: "(?i).*\\bcast\\s*\\(.*\\bas\\s+.*"
+      description: "Error-based injection (CAST)"
+      severity: high
+
+    # Stacked queries
+    - regex: "(?i).*;\\s*(drop|insert|update|delete|exec|execute)\\s+.*"
+      description: "Stacked query injection"
+      severity: critical
+
+    # Comment-based evasion
+    - regex: "(?i).*(/\\*|\\*/|--|#).*\\b(select|union|insert|drop).*"
+      description: "Comment-based SQL injection"
+      severity: high
+
+    # Information schema attacks
+    - regex: "(?i).*\\binformation_schema\\b.*"
+      description: "Information schema enumeration"
+      severity: medium
+
+    # System stored procedures (MSSQL)
+    - regex: "(?i).*\\bxp_cmdshell\\b.*"
+      description: "xp_cmdshell exploitation attempt"
+      severity: critical
+
+    - regex: "(?i).*\\bsp_executesql\\b.*"
+      description: "sp_executesql exploitation"
+      severity: high
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Aggregation Settings
+# ═══════════════════════════════════════════════════════════════════════════
+aggregation:
+  # Group events by this field
+  # Options: source_ip, event_type, source
+  group_by: source_ip
+
+  # Condition for triggering detection
+  # Variables: {count}, {threshold}
+  condition: count >= threshold
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Output Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+output:
+  # Reason template (supports variables)
+  # Variables: {rule_name}, {event_count}, {pattern_description}, {ip}, {threshold}
+  reason_template: "SQL injection detected: {pattern_description} - {event_count} attempts from {ip}"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines That Would Match
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. MSSQL prelogin with UNION injection:
+#    Nov 23 14:12:51 server sqlservr: Login failed for user 'admin' or 1=1-- CLIENT: 1.2.3.4
+#
+# 2. Authentication bypass attempt:
+#    2025-11-20 13:22:32.99 Logon Login failed for user 'admin' union select * from users [CLIENT: 1.2.3.4]
+#
+# 3. Time-based injection:
+#    Failed login: username='; waitfor delay '00:00:05'-- from 1.2.3.4
+#
+# 4. Comment-based evasion:
+#    Auth failure: user='admin'/**/union/**/select/**/ from 1.2.3.4
+#
+# ═══════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,443 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Custom Environment Detection Examples
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Example detection rules for specific environments.
+# Copy and customize for your needs.
+#
+# USAGE:
+# 1. Copy this file to a new name matching your environment
+# 2. Enable only the detectors you need
+# 3. Adjust thresholds based on your traffic patterns
+# 4. Test in learning mode before production
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+detectors:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 1: E-Commerce Platform                                      │
+  # │ For: Magento, WooCommerce, Shopify, custom shopping carts          │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: ecommerce_admin_bruteforce
+      version: 1.0.0
+      description: Detects admin panel bruteforce attacks
+      enabled: false  # Set to true to activate
+
+    detection:
+      event_types:
+        - FAILED_LOGIN
+        - PORT_SCAN
+
+      # Admin panels have low legitimate traffic
+      threshold: 8
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        # Generic admin paths
+        - regex: "(?i).*/admin.*login.*"
+          description: "Admin login page access"
+
+        # Magento
+        - regex: "(?i).*/admin_.*"
+          description: "Magento admin path"
+
+        # WooCommerce/WordPress
+        - regex: "(?i).*/wp-admin.*"
+          description: "WooCommerce admin"
+
+        # Custom admin paths (add yours)
+        - regex: "(?i).*/backend.*login.*"
+          description: "Custom backend login"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "E-commerce admin bruteforce - {event_count} login attempts"
+
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 2: API Gateway                                              │
+  # │ For: REST APIs, GraphQL, microservices                             │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: api_rate_limit_abuse
+      version: 1.0.0
+      description: Detects API rate limit abuse and token theft
+      enabled: false
+
+    detection:
+      event_types:
+        - FAILED_LOGIN
+        - PORT_SCAN
+
+      # APIs can have burst traffic, but excessive is suspicious
+      threshold: 100
+      time_window_minutes: 5  # Short window for rate limiting
+      confidence: medium
+
+      patterns:
+        # API auth failures
+        - regex: "(?i).*api.*401.*unauthorized.*"
+          description: "API 401 unauthorized"
+
+        - regex: "(?i).*api.*403.*forbidden.*"
+          description: "API 403 forbidden"
+
+        # Rate limiting
+        - regex: "(?i).*api.*429.*too many requests.*"
+          description: "API rate limit exceeded"
+
+        # Token issues
+        - regex: "(?i).*invalid.*token.*"
+          description: "Invalid API token"
+
+        - regex: "(?i).*expired.*token.*"
+          description: "Expired API token"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "API abuse: {pattern_description} - {event_count} requests in 5min"
+
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 3: Corporate Network (Internal)                             │
+  # │ For: Internal file servers, intranet, employee systems             │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: internal_lateral_movement
+      version: 1.0.0
+      description: Detects lateral movement and privilege escalation
+      enabled: false
+
+    detection:
+      event_types:
+        - FAILED_LOGIN
+
+      # Internal network should have very few auth failures
+      threshold: 3
+      time_window_minutes: 60
+      confidence: high
+
+      patterns:
+        # Multiple service access attempts
+        - regex: "(?i).*smb.*authentication.*failed.*"
+          description: "SMB/CIFS authentication failure"
+
+        - regex: "(?i).*ldap.*bind.*failed.*"
+          description: "LDAP bind failure"
+
+        - regex: "(?i).*kerberos.*authentication.*failed.*"
+          description: "Kerberos authentication failure"
+
+        # Privilege escalation
+        - regex: "(?i).*sudo.*incorrect.*password.*"
+          description: "Sudo privilege escalation attempt"
+
+        - regex: "(?i).*su:.*authentication.*failure.*"
+          description: "Su authentication failure"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "ALERT: Lateral movement detected - {pattern_description}"
+
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 4: Development/Staging Environment                          │
+  # │ For: Dev servers, staging, QA environments                         │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: dev_environment_probe
+      version: 1.0.0
+      description: Detects external probing of dev environments
+      enabled: false
+
+    detection:
+      event_types:
+        - PORT_SCAN
+        - FAILED_LOGIN
+
+      # Dev environments often have test traffic, so higher threshold
+      threshold: 50
+      time_window_minutes: 60
+      confidence: medium
+
+      patterns:
+        # Common dev paths that shouldn't be public
+        - regex: "(?i).*/test/.*"
+          description: "Test directory access"
+
+        - regex: "(?i).*/dev/.*"
+          description: "Dev directory access"
+
+        - regex: "(?i).*/staging/.*"
+          description: "Staging environment access"
+
+        # Debug endpoints
+        - regex: "(?i).*/debug.*"
+          description: "Debug endpoint access"
+
+        - regex: "(?i).*/phpinfo.*"
+          description: "PHPInfo exposure"
+
+        # Git/SVN exposure
+        - regex: "(?i).*\\.git/.*"
+          description: "Git repository exposure"
+
+        - regex: "(?i).*\\.svn/.*"
+          description: "SVN repository exposure"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Dev environment probe - {pattern_description}"
+
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 5: Cloud Infrastructure (AWS/Azure/GCP)                     │
+  # │ For: Cloud VMs, containers, serverless                             │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: cloud_metadata_service_abuse
+      version: 1.0.0
+      description: Detects attempts to access cloud metadata services (SSRF)
+      enabled: false
+
+    detection:
+      event_types:
+        - PORT_SCAN
+        - FAILED_LOGIN
+
+      # Even single attempt is suspicious
+      threshold: 1
+      time_window_minutes: 60
+      confidence: high
+
+      patterns:
+        # AWS metadata service
+        - regex: "(?i).*169\\.254\\.169\\.254.*"
+          description: "AWS metadata service access (SSRF)"
+          severity: critical
+
+        # Azure metadata service
+        - regex: "(?i).*169\\.254\\.169\\.254.*"
+          description: "Azure metadata service"
+          severity: critical
+
+        # GCP metadata service
+        - regex: "(?i).*metadata\\.google\\.internal.*"
+          description: "GCP metadata service"
+          severity: critical
+
+        # Kubernetes service account token
+        - regex: "(?i).*/var/run/secrets/kubernetes.*"
+          description: "K8s service account token access"
+          severity: critical
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "CRITICAL: Cloud metadata service abuse - {pattern_description}"
+
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 6: Mail Server (SMTP/IMAP/POP3)                            │
+  # │ For: Postfix, Dovecot, Exchange, Zimbra                           │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: email_credential_stuffing
+      version: 1.0.0
+      description: Detects email credential stuffing and spam relay attempts
+      enabled: false
+
+    detection:
+      event_types:
+        - FAILED_LOGIN
+
+      threshold: 10
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        # SMTP authentication
+        - regex: "(?i).*smtp.*authentication.*failed.*"
+          description: "SMTP authentication failure"
+
+        - regex: "(?i).*postfix.*sasl.*authentication.*failed.*"
+          description: "Postfix SASL auth failure"
+
+        # IMAP
+        - regex: "(?i).*imap.*login.*failed.*"
+          description: "IMAP login failure"
+
+        - regex: "(?i).*dovecot.*auth.*failed.*"
+          description: "Dovecot authentication failure"
+
+        # POP3
+        - regex: "(?i).*pop3.*authentication.*failed.*"
+          description: "POP3 authentication failure"
+
+        # Relay attempts
+        - regex: "(?i).*relay.*denied.*"
+          description: "Spam relay attempt"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Email credential stuffing - {pattern_description}"
+
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 7: VPN/Remote Access                                        │
+  # │ For: OpenVPN, WireGuard, Cisco AnyConnect, Fortinet               │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: vpn_bruteforce
+      version: 1.0.0
+      description: Detects VPN bruteforce attacks
+      enabled: false
+
+    detection:
+      event_types:
+        - FAILED_LOGIN
+
+      # VPN auth failures should be rare
+      threshold: 5
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        # OpenVPN
+        - regex: "(?i).*openvpn.*authentication.*failed.*"
+          description: "OpenVPN auth failure"
+
+        # IPSec/IKE
+        - regex: "(?i).*ipsec.*authentication.*failed.*"
+          description: "IPSec auth failure"
+
+        - regex: "(?i).*ike.*authentication.*failed.*"
+          description: "IKE auth failure"
+
+        # WireGuard (less verbose, check for connection denials)
+        - regex: "(?i).*wireguard.*handshake.*failed.*"
+          description: "WireGuard handshake failure"
+
+        # Cisco AnyConnect
+        - regex: "(?i).*webvpn.*login.*failed.*"
+          description: "Cisco AnyConnect login failure"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "VPN bruteforce - {pattern_description}"
+
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Example 8: DNS Server                                               │
+  # │ For: BIND, Unbound, PowerDNS                                       │
+  # └─────────────────────────────────────────────────────────────────────┘
+
+  - metadata:
+      name: dns_amplification_attack
+      version: 1.0.0
+      description: Detects DNS amplification and DDoS attempts
+      enabled: false
+
+    detection:
+      event_types:
+        - PORT_SCAN
+
+      # High volume queries
+      threshold: 50
+      time_window_minutes: 5
+      confidence: medium
+
+      patterns:
+        # Excessive queries
+        - regex: "(?i).*dns.*query.*rate.*limit.*"
+          description: "DNS query rate limit exceeded"
+
+        # Recursion abuse
+        - regex: "(?i).*dns.*recursion.*denied.*"
+          description: "DNS recursion abuse"
+
+        # ANY queries (amplification)
+        - regex: "(?i).*dns.*query.*type.*ANY.*"
+          description: "DNS ANY query (amplification)"
+
+        # Zone transfer attempts
+        - regex: "(?i).*dns.*axfr.*denied.*"
+          description: "DNS zone transfer attempt"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "DNS attack - {pattern_description}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEPLOYMENT INSTRUCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. Copy relevant examples to new file:
+#    cp custom_environment_examples.yaml my_environment.yaml
+#
+# 2. Delete unused detectors, keep only what you need
+#
+# 3. Enable detectors:
+#    enabled: false → enabled: true
+#
+# 4. Customize patterns for your log format
+#
+# 5. Adjust thresholds based on your traffic:
+#    - Start with 2x recommended threshold
+#    - Monitor for 1 week
+#    - Reduce gradually if no false positives
+#
+# 6. Test in learning mode first:
+#    enable_nftables_integration = false
+#
+# 7. Deploy to production:
+#    sudo systemctl restart tribanft
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# THRESHOLD TUNING GUIDELINES
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Traffic Level          | Starting Threshold | Time Window
+# -----------------------|-------------------|-------------
+# Very Low (<10 req/min) | 3-5               | 60-120 min
+# Low (10-50 req/min)    | 10-15             | 30-60 min
+# Medium (50-200 req/min)| 20-30             | 15-30 min
+# High (200-1000 req/min)| 50-100            | 5-15 min
+# Very High (>1000)      | 100-500           | 5 min
+#
+# Confidence Levels:
+# - high: Aggressive blocking, fewer false negatives
+# - medium: Balanced approach
+# - low: Conservative, fewer false positives
+#
+# ═══════════════════════════════════════════════════════════════════════════

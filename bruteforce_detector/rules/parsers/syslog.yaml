@@ -1,0 +1,53 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Syslog Parser Pattern Definitions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Patterns for parsing /var/log/syslog for security events.
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-21
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: syslog_parser
+  version: 1.0.0
+  author: TribanFT Project
+  description: Syslog file parser patterns for MSSQL prelogin and port scans
+  log_format: syslog
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Groups
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ MSSQL Prelogin Patterns                                             │
+  # └─────────────────────────────────────────────────────────────────────┘
+  prelogin:
+    - regex: '(\w+\s+\d+\s+\d+:\d+:\d+).*sqlservr.*prelogin.*CLIENT:\s*([0-9a-fA-F\.:]+)'
+      description: 'MSSQL prelogin packet (generic)'
+
+    - regex: '(\w+\s+\d+\s+\d+:\d+:\d+).*sqlservr.*prelogin packet.*CLIENT:\s*([0-9a-fA-F\.:]+)'
+      description: 'MSSQL prelogin packet (specific)'
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Port Scan Patterns                                                  │
+  # └─────────────────────────────────────────────────────────────────────┘
+  port_scan:
+    - regex: '(\w+\s+\d+\s+\d+:\d+:\d+).*kernel:.*System port scan.*SRC=([0-9a-fA-F\.:]+)'
+      description: 'Kernel port scan detection'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Prelogin:
+#   Nov 23 14:12:51 hostname sqlservr: prelogin packet used to open a connection CLIENT: 1.2.3.4
+#
+# Port scan:
+#   Nov 23 14:12:51 hostname kernel: System port scan detected SRC=1.2.3.4
+#
+# ═══════════════════════════════════════════════════════════════════════════
