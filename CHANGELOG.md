@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Enhanced NFTables integration with automatic set discovery and flexible IP import capabilities.
 
+**Note:** Initial release had integration issues - features were coded but not connected to detection flow. Fixed in same-day patch (see "Fixed" section below).
+
 ### Added
 
 #### NFTables Discovery
@@ -50,10 +52,22 @@ Enhanced NFTables integration with automatic set discovery and flexible IP impor
   - Maintains backward compatibility (identical output format)
   - Improved maintainability through code reuse
 
+### Fixed
+
+- **Integration Bug (Same-Day Patch)**
+  - Issue: v2.4.0 methods existed but were never called
+  - Root cause: Missing Pydantic config fields, no detection flow integration
+  - Fix: Added config parsing in `config.py` (lines 344-347, 509-522)
+  - Fix: Integrated discovery/import calls in `main.py` `_enrich_metadata_from_sources()` (lines 353-400)
+  - Result: All v2.4.0 features now fully operational
+  - Files modified: `config.py` (+17 lines), `main.py` (+47 lines)
+
 ### Documentation
 
 - Updated docs/CONFIGURATION.md with NFTables discovery parameters
 - Added usage examples for discovery and flexible import methods
+- Added activation instructions in implementation summary
+- Documented bug fix and integration changes
 
 ---
 

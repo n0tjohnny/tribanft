@@ -350,8 +350,47 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
             
             enriched_data = {}
             
-            # 1. Import from NFTables port_scanners set
+            # 1. NFTables Discovery (v2.4)
             if self.config.enable_nftables_update:
+                # Auto-discover NFTables sets if enabled
+                if self.config.nftables_auto_discovery:
+                    try:
+                        discovered_sets = self.blacklist_manager.nft_sync.discover_nftables_sets()
+                        if discovered_sets:
+                            self.logger.info(f"   Discovered {len(discovered_sets)} NFTables sets")
+                            for key, info in discovered_sets.items():
+                                self.logger.debug(f"      - {key}: type={info['type']}, flags={info['flags']}")
+                        else:
+                            self.logger.debug("   No NFTables sets discovered")
+                    except Exception as e:
+                        self.logger.warning(f"   WARNING: NFTables discovery failed: {e}")
+
+                # Import from configured custom sets
+                if self.config.nftables_import_sets:
+                    try:
+                        import_sets_str = self.config.nftables_import_sets.strip()
+                        if import_sets_str:
+                            import_specs = [s.strip() for s in import_sets_str.split(',') if s.strip()]
+                            for spec in import_specs:
+                                # Parse format: family:table:set_name
+                                parts = spec.split(':')
+                                if len(parts) == 3:
+                                    family, table, set_name = parts
+                                    imported_ips = self.blacklist_manager.nft_sync.import_from_set(
+                                        table=table,
+                                        set_name=set_name,
+                                        family=family,
+                                        reason=f"NFTables import from {spec}"
+                                    )
+                                    if imported_ips:
+                                        enriched_data.update(imported_ips)
+                                        self.logger.info(f"   Imported {len(imported_ips)} IPs from {spec}")
+                                else:
+                                    self.logger.warning(f"   Invalid set spec '{spec}' (use family:table:set)")
+                    except Exception as e:
+                        self.logger.warning(f"   WARNING: Custom set import failed: {e}")
+
+                # Import from NFTables port_scanners set (default behavior)
                 try:
                     port_scanner_ips = self.blacklist_manager.nft_sync.get_port_scanners()
                     if port_scanner_ips:

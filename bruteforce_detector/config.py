@@ -341,6 +341,11 @@ class DetectorConfig(BaseSettings):
     rate_limit_backoff: int = 30
     fallback_interval: int = 60
 
+    # === NFTables Discovery (NEW in v2.4) ===
+    nftables_event_log_enabled: bool = False
+    nftables_auto_discovery: bool = False
+    nftables_import_sets: Optional[str] = None  # Comma-separated sets (family:table:set)
+
     model_config = {
         'env_prefix': 'BFD_',
         'case_sensitive': False
@@ -500,6 +505,21 @@ class DetectorConfig(BaseSettings):
                 logger.debug(f"DEBUG: CONFIG: min_expected_ips = {self.min_expected_ips}")
             except ValueError:
                 logger.warning(f"Invalid integer value for min_expected_ips: {min_ips_str}")
+
+        # NFTables Discovery settings (NEW in v2.4)
+        for field in ['nftables_event_log_enabled', 'nftables_auto_discovery']:
+            value_str = _get_from_sources(field, config_dict)
+            if value_str is not None:
+                try:
+                    setattr(self, field, _parse_bool(value_str, field))
+                    logger.debug(f"DEBUG: CONFIG: {field} = {value_str}")
+                except ValueError as e:
+                    logger.warning(str(e))
+
+        nftables_import_str = _get_from_sources('nftables_import_sets', config_dict)
+        if nftables_import_str is not None:
+            self.nftables_import_sets = nftables_import_str.strip()
+            logger.debug(f"DEBUG: CONFIG: nftables_import_sets = {nftables_import_str}")
 
         data_dir = Path(self.data_dir)
         state_dir = Path(self.state_dir)

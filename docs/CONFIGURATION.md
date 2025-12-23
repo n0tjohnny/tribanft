@@ -384,6 +384,35 @@ nftables_import_sets =                   # Comma-separated sets to import
 - **Flexible Import**: Import IPs from any NFTables set, not just predefined ones
 - **Whitelist Filtering**: Automatically skips whitelisted IPs during import
 
+**Usage Examples**:
+
+```bash
+# Example 1: Enable auto-discovery (logs all available sets)
+[nftables]
+nftables_auto_discovery = true
+
+# Example 2: Import from custom CrowdSec and attacker sets
+[nftables]
+nftables_import_sets = inet:filter:crowdsec,inet:filter:attackers_ipv4
+
+# Example 3: Enable event logging for debugging
+[nftables]
+nftables_event_log_enabled = true
+
+# View event log:
+tail -f ~/.local/share/tribanft/nftables_events.jsonl
+jq . ~/.local/share/tribanft/nftables_events.jsonl  # Pretty-print with jq
+```
+
+**Expected Log Output** (with `tribanft --detect --verbose`):
+```
+INFO - Discovered 5 NFTables sets
+DEBUG -    - inet:filter:blacklist_ipv4: type=ipv4_addr, flags=['timeout']
+DEBUG -    - inet:filter:port_scanners: type=ipv4_addr, flags=['timeout', 'dynamic']
+INFO - Imported 42 IPs from inet:filter:crowdsec
+INFO - Found 15 IPs in port_scanners
+```
+
 ---
 
 ### [advanced] - Advanced Settings
