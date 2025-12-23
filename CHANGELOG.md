@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] - 2025-12-23
+
+### NFTables Discovery & Extensibility Release
+
+Enhanced NFTables integration with automatic set discovery and flexible IP import capabilities.
+
+### Added
+
+#### NFTables Discovery
+- **discover_nftables_sets()** method in NFTablesManager
+  - Auto-discover all NFTables sets in the system
+  - Extract metadata: family, table, set name, type, flags, timeout
+  - Filter by family (ip/ip6/inet) or verdict context
+  - Returns structured dict mapping set identifiers to metadata
+
+- **import_from_set()** generic method in NFTablesManager
+  - Import IPs from any NFTables set, not just port_scanners
+  - Flexible parameters: table, set_name, family, reason
+  - Automatic whitelist filtering
+  - Returns data compatible with BlacklistAdapter
+  - Replaces hardcoded set names with dynamic discovery
+
+#### Shadow Event Log (Alternative D Implementation)
+- **Optional JSONL event log** for NFTables operations
+  - Append-only audit trail at `${state_dir}/nftables_events.jsonl`
+  - Logs discovery and import events with timestamps
+  - Non-blocking: failures do not affect core functionality
+  - Enables debugging, replay, and historical analysis
+  - Controlled via `nftables_event_log_enabled` config parameter
+
+#### Configuration
+- **NFTables Discovery Section** in config.conf.template
+  - `nftables_event_log_enabled`: Enable shadow event log (default: false)
+  - `nftables_auto_discovery`: Auto-discover sets flag (default: false)
+  - `nftables_import_sets`: Comma-separated custom sets to import
+
+### Changed
+
+- **Refactored get_port_scanners()** to use generic import_from_set()
+  - Reduced code duplication by ~70 lines
+  - Maintains backward compatibility (identical output format)
+  - Improved maintainability through code reuse
+
+### Documentation
+
+- Updated docs/CONFIGURATION.md with NFTables discovery parameters
+- Added usage examples for discovery and flexible import methods
+
+---
+
 ## [2.3.0] - 2025-12-22
 
 ### Real-Time Monitoring Release

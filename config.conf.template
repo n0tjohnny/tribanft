@@ -235,6 +235,27 @@ crowdsec_sets = inet filter crowdsec
 fail2ban_pattern = inet f2b-table addr-set-*
 
 # ───────────────────────────────────────────────────────────────────────────
+# NFTables Discovery & Event Logging (NEW in v2.4)
+# ───────────────────────────────────────────────────────────────────────────
+
+# Enable shadow event log for NFTables operations (JSONL format)
+# This creates an append-only audit trail without affecting core functionality
+# Log location: ${paths:state_dir}/nftables_events.jsonl
+# Default: false (disabled)
+nftables_event_log_enabled = false
+
+# Enable automatic discovery of NFTables sets
+# When enabled, TribanFT can detect and import from any NFTables set
+# Default: false (manual configuration only)
+nftables_auto_discovery = false
+
+# Sets to automatically import from (comma-separated)
+# Format: family:table:set_name,family:table:set_name
+# Example: inet:filter:attackers_ipv4,inet:filter:crowdsec_blocklist
+# Leave empty to disable auto-import
+nftables_import_sets =
+
+# ───────────────────────────────────────────────────────────────────────────
 # NFTables Parser Configuration (Port Scan Detection Thresholds)
 # ───────────────────────────────────────────────────────────────────────────
 # NOTE: Port scan and network scan thresholds are configured in YAML, not here.

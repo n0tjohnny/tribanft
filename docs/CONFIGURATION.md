@@ -349,7 +349,7 @@ chmod 600 ~/.local/share/tribanft/ipinfo_token.txt
 
 ### [nftables] - NFTables Integration
 
-Configure firewall synchronization:
+Configure firewall synchronization and discovery:
 
 ```ini
 [nftables]
@@ -365,11 +365,24 @@ crowdsec_sets = inet filter crowdsec
 
 # Fail2Ban sets pattern (supports wildcards)
 fail2ban_pattern = inet f2b-table addr-set-*
+
+# NFTables Discovery & Event Logging (NEW in v2.4)
+nftables_event_log_enabled = false       # Enable shadow event log (JSONL format)
+nftables_auto_discovery = false          # Auto-discover all NFTables sets
+nftables_import_sets =                   # Comma-separated sets to import
+                                         # Format: family:table:set_name
+                                         # Example: inet:filter:attackers_ipv4
 ```
 
 **Bidirectional Sync**:
 - **Import**: IPs from `port_scanners_set`, `crowdsec_sets`, `fail2ban_pattern` → TribanFT blacklist
 - **Export**: TribanFT blacklist → `blacklist_set` in NFTables
+
+**Discovery Features (v2.4+)**:
+- **Event Log**: Optional JSONL audit trail at `${state_dir}/nftables_events.jsonl`
+- **Auto-Discovery**: Automatically detect all NFTables sets in the system
+- **Flexible Import**: Import IPs from any NFTables set, not just predefined ones
+- **Whitelist Filtering**: Automatically skips whitelisted IPs during import
 
 ---
 
