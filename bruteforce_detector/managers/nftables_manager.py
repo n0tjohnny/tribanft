@@ -135,11 +135,12 @@ class NFTablesManager:
 
             self.logger.info(f"Discovered {len(sets_info)} NFTables sets")
 
-            # Log event
+            # Log event with set names
             self._log_event('nftables_discovery', {
                 'sets_found': len(sets_info),
                 'family_filter': family_filter,
-                'verdict_filter': verdict_filter
+                'verdict_filter': verdict_filter,
+                'sets': {key: {'type': info['type'], 'flags': info['flags']} for key, info in sets_info.items()}
             })
 
             return sets_info
