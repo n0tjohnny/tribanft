@@ -357,9 +357,23 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
                     try:
                         discovered_sets = self.blacklist_manager.nft_sync.discover_nftables_sets()
                         if discovered_sets:
-                            self.logger.info(f"   Discovered {len(discovered_sets)} NFTables sets")
+                            self.logger.info(f"   Discovered {len(discovered_sets)} NFTables sets:")
                             for key, info in discovered_sets.items():
-                                self.logger.debug(f"      - {key}: type={info['type']}, flags={info['flags']}")
+                                # Get IP count from each set
+                                family, table, set_name = key.split(':')
+                                try:
+                                    ips = self.blacklist_manager.nft_sync.import_from_set(
+                                        table=table,
+                                        set_name=set_name,
+                                        family=family,
+                                        reason=f"Discovery from {key}"
+                                    )
+                                    ip_count = len(ips) if ips else 0
+                                    self.logger.info(f"      - {key}: {ip_count} IPs (type={info['type']})")
+                                    if ips:
+                                        enriched_data.update(ips)
+                                except Exception as e:
+                                    self.logger.debug(f"      - {key}: Could not import ({e})")
                         else:
                             self.logger.debug("   No NFTables sets discovered")
                     except Exception as e:
@@ -390,14 +404,15 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
                     except Exception as e:
                         self.logger.warning(f"   WARNING: Custom set import failed: {e}")
 
-                # Import from NFTables port_scanners set (default behavior)
-                try:
-                    port_scanner_ips = self.blacklist_manager.nft_sync.get_port_scanners()
-                    if port_scanner_ips:
-                        enriched_data.update(port_scanner_ips)
-                        self.logger.info(f"   Found {len(port_scanner_ips)} IPs in port_scanners")
-                except Exception as e:
-                    self.logger.warning(f"   WARNING: Port scanner import failed: {e}")
+                # Import from NFTables port_scanners set (fallback if auto-discovery disabled)
+                if not self.config.nftables_auto_discovery:
+                    try:
+                        port_scanner_ips = self.blacklist_manager.nft_sync.get_port_scanners()
+                        if port_scanner_ips:
+                            enriched_data.update(port_scanner_ips)
+                            self.logger.info(f"   Found {len(port_scanner_ips)} IPs in port_scanners")
+                    except Exception as e:
+                        self.logger.warning(f"   WARNING: Port scanner import failed: {e}")
             
             # 2. Enrich from CrowdSec historical alerts
             if self.config.enable_crowdsec_integration:
