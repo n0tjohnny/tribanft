@@ -124,8 +124,16 @@ syslog_path = /var/log/syslog
 # MSSQL error log (if running SQL Server)
 mssql_error_log_path = /var/opt/mssql/log/errorlog
 
+# Apache access log (for SQL injection and WordPress attack detection)
+# Common paths: /var/log/apache2/access.log (Debian/Ubuntu)
+#               /var/log/httpd/access_log (RedHat/CentOS/Fedora)
+apache_access_log_path = /var/log/apache2/access.log
+
+# Nginx access log (for SQL injection and WordPress attack detection)
+nginx_access_log_path = /var/log/nginx/access.log
+
 # TribanFT application log (auto-generated if omitted)
-# app_log_path = ${paths:state_dir}/tribanft.log
+app_log_path = ${paths:state_dir}/tribanft.log
 ```
 
 ---
@@ -223,18 +231,62 @@ enable_auto_enrichment = true           # Periodic metadata refresh from NFTable
 
 ```ini
 [plugins]
-# Enable plugin auto-discovery system (Phase 1)
+# Enable plugin auto-discovery system
+# When enabled, detectors and parsers are automatically loaded from plugins/ directory
+# When disabled, uses legacy hardcoded detector/parser initialization
 enable_plugin_system = true
 
-# Enable YAML-based detection rules (Phase 2)
+# Plugin directories (relative to project_dir)
+# These directories are scanned for detector and parser plugins
+detector_plugin_dir = ${paths:project_dir}/bruteforce_detector/plugins/detectors
+parser_plugin_dir = ${paths:project_dir}/bruteforce_detector/plugins/parsers
+
+# ┌───────────────────────────────────────────────────────────────────────┐
+# │ YAML Rule Engine                                                      │
+# │ Define detection patterns in YAML files - no code required!          │
+# └───────────────────────────────────────────────────────────────────────┘
+
+# Enable YAML-based detection rules
+# When enabled, scans rules_dir for YAML rule files
 enable_yaml_rules = true
 
-# Plugin directories
-detector_plugin_dir = ${paths:data_dir}/bruteforce_detector/plugins/detectors
-parser_plugin_dir = ${paths:data_dir}/bruteforce_detector/plugins/parsers
-
 # Rules directory for YAML-based detection patterns
-rules_dir = ${paths:data_dir}/bruteforce_detector/rules
+# Place your custom .yaml rule files here
+rules_dir = ${paths:project_dir}/bruteforce_detector/rules
+```
+
+**YAML Parser Patterns (NEW in v2.1)**:
+
+Parser patterns are automatically loaded from `${rules_dir}/parsers/`
+
+**Pattern files:**
+- `apache.yaml` - Apache/Nginx SQL injection, WordPress attack patterns
+- `syslog.yaml` - Syslog prelogin, port scan patterns
+- `mssql.yaml` - MSSQL failed login patterns
+- `nftables.yaml` - NFTables port scan and network scan thresholds
+- `PARSER_TEMPLATE.yaml.example` - Template for custom patterns
+
+**To add custom patterns:**
+1. Copy `PARSER_TEMPLATE.yaml.example` to `custom_parser.yaml`
+2. Edit `pattern_groups` section with your regex patterns
+3. Restart tribanft or re-run detection
+
+No restart required for pattern updates - loaded at parser initialization.
+
+**Per-Plugin Configuration:**
+
+Control individual plugins by adding sections like `[plugin:detector_name]` or `[plugin:parser_name]`:
+
+```ini
+# Example: Disable specific plugin
+# enable_prelogin_detector_plugin = false
+# enable_crowdsec_detector_plugin = false
+
+# Example: Custom plugin configuration (for future custom plugins)
+# [plugin:custom_detector]
+# threshold = 15
+# time_window = 120
+# custom_parameter = value
 ```
 
 **Plugin System Features:**
@@ -246,7 +298,7 @@ rules_dir = ${paths:data_dir}/bruteforce_detector/rules
 
 **Directory Structure:**
 ```
-~/.local/share/tribanft/bruteforce_detector/
+${project_dir}/bruteforce_detector/
 ├── core/
 │   ├── plugin_manager.py      # Auto-discovery engine
 │   └── rule_engine.py          # YAML rule processor
@@ -258,19 +310,27 @@ rules_dir = ${paths:data_dir}/bruteforce_detector/rules
 │   │   └── crowdsec.py
 │   └── parsers/                # Parser plugins (Python files)
 │       ├── syslog.py
-│       └── mssql.py
+│       ├── mssql.py
+│       ├── apache.py
+│       └── nftables.py
 └── rules/
-    └── detectors/              # YAML detection rules
-        ├── sql_injection.yaml
-        ├── rdp_bruteforce.yaml
-        ├── wordpress_attacks.yaml
-        └── custom_environment_examples.yaml
+    ├── detectors/              # YAML detection rules
+    │   ├── sql_injection.yaml
+    │   ├── rdp_bruteforce.yaml
+    │   ├── wordpress_attacks.yaml
+    │   └── custom_environment_examples.yaml
+    └── parsers/                # YAML parser patterns
+        ├── apache.yaml
+        ├── syslog.yaml
+        ├── mssql.yaml
+        ├── nftables.yaml
+        └── PARSER_TEMPLATE.yaml.example
 ```
 
 **See Also:**
 - [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md) - Creating custom plugins
 - [RULE_SYNTAX.md](RULE_SYNTAX.md) - YAML rule syntax reference
-- [PHASE_1_2_SUMMARY.md](PHASE_1_2_SUMMARY.md) - Complete plugin system overview
+- [PARSER_EVENTTYPES_MAPPING.md](PARSER_EVENTTYPES_MAPPING.md) - Parser pattern syntax and event types
 
 ---
 
@@ -302,13 +362,17 @@ sync_to_file = true
 # Batch size for bulk operations
 batch_size = 2000
 
-# Backup retention policy
-backup_retention_days = 3               # Days to keep backups (reduced from 7)
-backup_min_keep = 3                     # Minimum backups to keep (reduced from 5)
-backup_compress_age_days = 0            # Compress immediately (0 = instant)
+# Backup configuration
+backup_enabled = true                   # Enable automatic backups
+backup_interval_days = 7                # Only backup if last backup was >7 days ago
+backup_retention_days = 30              # Days to keep backups
+backup_min_keep = 4                     # Minimum backups to keep (even if older than retention)
+backup_compress_age_days = 1            # Compress backups older than 1 day
 ```
 
 **Backup Settings Explained**:
+- **backup_enabled**: Master switch for automatic backups (set to false to disable all backups)
+- **backup_interval_days**: Only create backup if last backup was more than X days ago (0 = every run, not recommended)
 - **backup_retention_days**: Delete backups older than this
 - **backup_min_keep**: Always keep at least this many (even if older than retention)
 - **backup_compress_age_days**: Compress backups older than this (0 = compress immediately)
@@ -415,6 +479,71 @@ INFO - Found 15 IPs in port_scanners
 
 ---
 
+### [realtime] - Real-Time Log Monitoring (NEW in v2.3)
+
+Real-time monitoring uses filesystem events (inotify/kqueue) to detect new log entries immediately, reducing detection lag from 5 minutes to <2 seconds.
+
+If watchdog library is unavailable or fails, automatically falls back to periodic mode with 60-second intervals (no manual configuration needed).
+
+```ini
+[realtime]
+# Enable real-time monitoring for specific log sources
+# Set to false to disable monitoring for that source
+monitor_syslog = true
+monitor_mssql = true
+monitor_apache = true
+monitor_nginx = true
+
+# Alternative: Explicitly list custom files to monitor
+# Uncomment to override auto-detection from log paths
+# monitor_files = /var/log/auth.log, /custom/app.log
+
+# Debounce interval (seconds)
+# Batch rapid log writes within this window to reduce processing load
+# Default: 1.0 second (handles log bursts efficiently)
+debounce_interval = 1.0
+
+# Rate limiting for DoS protection
+# Maximum log events to process per second before triggering backoff
+# Prevents attackers from overwhelming the system by flooding logs
+max_events_per_second = 1000
+
+# Rate limit backoff duration (seconds)
+# If rate limit exceeded, pause real-time monitoring for this duration
+# System falls back to periodic mode during backoff
+rate_limit_backoff = 30
+
+# Fallback interval (seconds)
+# If real-time monitoring fails to start (missing inotify, permissions, etc),
+# automatically fall back to periodic polling at this interval
+# Default: 60 seconds (1 minute)
+fallback_interval = 60
+```
+
+**Key Features:**
+
+- **Sub-second Detection**: Near-instant detection of new attacks (<2 seconds vs 5 minutes in periodic mode)
+- **Automatic Fallback**: Gracefully degrades to periodic mode if real-time monitoring is unavailable
+- **DoS Protection**: Rate limiting prevents log flooding attacks from overwhelming the system
+- **Debouncing**: Efficiently batches rapid log writes to reduce CPU usage
+- **Per-Source Control**: Enable/disable monitoring for individual log sources
+
+**Requirements:**
+
+- Python `watchdog` library (install with `pip install watchdog`)
+- Read access to monitored log files
+- Filesystem support for inotify (Linux) or kqueue (BSD/macOS)
+
+**Troubleshooting:**
+
+If real-time monitoring fails to start:
+1. Check log file permissions: `ls -l /var/log/syslog`
+2. Verify watchdog is installed: `pip list | grep watchdog`
+3. Check system logs for inotify errors: `dmesg | grep inotify`
+4. System will automatically fall back to periodic mode (60-second interval)
+
+---
+
 ### [advanced] - Advanced Settings
 
 ```ini
@@ -422,13 +551,25 @@ INFO - Found 15 IPs in port_scanners
 # Enable verbose logging (debug mode)
 verbose = false
 
-# Skip automatic integrity verification on startup (faster but risky)
+# Disable startup integrity verification (faster but risky)
 skip_verify = false
 
-# Service user/group (systemd only)
+# Minimum expected IPs in blacklist (anti-corruption protection)
+# If blacklist drops below this threshold and loses >50% of IPs, write is blocked
+# Set to 0 to disable protection (not recommended)
+min_expected_ips = 1000
+
+# User and group for service execution (systemd only)
 service_user = root
 service_group = root
 ```
+
+**Advanced Settings Explained**:
+
+- **verbose**: Enable debug-level logging for troubleshooting
+- **skip_verify**: Disable integrity checks on startup (only use for emergency performance - disables corruption detection)
+- **min_expected_ips**: Anti-corruption threshold - prevents accidental mass deletion of blacklist entries
+- **service_user/service_group**: User and group for systemd service execution (requires root for NFTables access)
 
 **Warning**: `skip_verify = true` disables corruption detection. Only use for emergency performance.
 
@@ -658,17 +799,37 @@ Temporarily override settings without editing `config.conf`:
 # Path overrides
 export TRIBANFT_DATA_DIR=/tmp/tribanft/data
 export TRIBANFT_STATE_DIR=/tmp/tribanft/state
+export TRIBANFT_CONFIG_DIR=/tmp/tribanft/config
 
 # Detection thresholds
 export BFD_FAILED_LOGIN_THRESHOLD=10
 export BFD_TIME_WINDOW_MINUTES=1440  # 24 hours
+export BFD_PORT_SCAN_THRESHOLD=15
+export BFD_PRELOGIN_PATTERN_THRESHOLD=25
 
 # Storage backend
 export BFD_USE_DATABASE=true
+export BFD_SYNC_TO_FILE=false
 
 # Backup settings
-export BFD_BACKUP_RETENTION_DAYS=1
-export BFD_BACKUP_MIN_KEEP=2
+export BFD_BACKUP_ENABLED=true
+export BFD_BACKUP_INTERVAL_DAYS=7
+export BFD_BACKUP_RETENTION_DAYS=30
+export BFD_BACKUP_MIN_KEEP=4
+export BFD_BACKUP_COMPRESS_AGE_DAYS=1
+
+# Advanced settings
+export BFD_VERBOSE=true
+export BFD_MIN_EXPECTED_IPS=500
+
+# Real-time monitoring
+export BFD_MONITOR_SYSLOG=true
+export BFD_DEBOUNCE_INTERVAL=1.0
+export BFD_MAX_EVENTS_PER_SECOND=1000
+
+# NFTables discovery
+export BFD_NFTABLES_AUTO_DISCOVERY=true
+export BFD_NFTABLES_EVENT_LOG_ENABLED=true
 
 # Run with overrides
 tribanft --detect
@@ -818,9 +979,10 @@ sqlite3 ~/.local/share/tribanft/blacklist.db "PRAGMA integrity_check;"
 2. **Use config.conf**: Better than environment variables for permanent settings
 3. **Enable database**: For >1000 IPs, essential for >10,000 IPs
 4. **Keep file sync**: Compatibility with legacy tools
-5. **Aggressive backups**: 3 days retention, compress immediately (default in v1.3.0+)
+5. **Smart backups**: 30 days retention with interval-based backups (default in v1.3.0+) - reduces backup count by ~90%
 6. **Monitor logs**: Check `~/.local/share/tribanft/tribanft.log` for issues
 7. **Verify integrity**: Run `tribanft --verify` monthly
+8. **Enable real-time monitoring**: Reduce detection lag from 5 minutes to <2 seconds (v2.3+)
 
 ---
 
