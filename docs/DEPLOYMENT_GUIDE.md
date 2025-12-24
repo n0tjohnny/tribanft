@@ -1,10 +1,19 @@
 # TribanFT Deployment & Testing Guide
 
-Complete guide for deploying TribanFT with plugin system and YAML rules.
+Complete guide for deploying TribanFT with plugin system, YAML rules, real-time monitoring, and NFTables integration.
 
 **Author**: TribanFT Project
 **License**: GNU GPL v3
-**Last Updated**: 2025-01-20
+**Last Updated**: 2025-12-23
+**Version**: 2.4.0
+
+**Features Covered**:
+- Plugin auto-discovery system (Phase 1 & 2)
+- YAML-based detection rules and parser patterns
+- Real-time log monitoring (v2.3)
+- NFTables discovery and integration (v2.4)
+- SQLite database backend with smart backups
+- CrowdSec and Fail2Ban integration
 
 ---
 
@@ -57,9 +66,16 @@ sudo systemctl stop tribanft
 # Check Python version
 python3 --version  # Should be >= 3.8
 
-# Check if PyYAML is installed
+# Check required Python packages
 python3 -c "import yaml; print('PyYAML:', yaml.__version__)"
-# If not installed: pip3 install pyyaml
+python3 -c "import pydantic; print('Pydantic:', pydantic.__version__)"
+python3 -c "import pydantic_settings; print('Pydantic Settings: OK')"
+# If not installed: pip3 install pyyaml pydantic pydantic-settings
+
+# Check optional packages
+python3 -c "import watchdog; print('watchdog:', watchdog.__version__)" || \
+    echo "⚠ watchdog not installed (real-time monitoring will be disabled)"
+# If not installed: pip3 install watchdog
 
 # Check systemd
 systemctl --version
@@ -124,29 +140,37 @@ cd ~/.local/share/tribanft
 
 # If you don't have config.conf yet, create from template
 if [ ! -f config.conf ]; then
-    cp bruteforce_detector/config.conf.template config.conf
+    cp config.conf.template config.conf
+    echo "✓ Created config.conf from template"
+else
+    echo "✓ config.conf already exists"
 fi
 
-# Add new plugin system settings
-cat >> config.conf << 'EOF'
+# Verify plugin system settings are present
+grep -q "\[plugins\]" config.conf || cat >> config.conf << 'EOF'
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [plugins] - Plugin System Configuration (Phase 1 & 2)
+# [plugins] - Plugin System Configuration
 # ═══════════════════════════════════════════════════════════════════════════
 [plugins]
 
 # Enable plugin auto-discovery system
+# When enabled, detectors and parsers are automatically loaded from plugins/ directory
+# When disabled, uses legacy hardcoded detector/parser initialization
 enable_plugin_system = true
 
+# Plugin directories (relative to project_dir)
+# These directories are scanned for detector and parser plugins
+detector_plugin_dir = ${paths:project_dir}/bruteforce_detector/plugins/detectors
+parser_plugin_dir = ${paths:project_dir}/bruteforce_detector/plugins/parsers
+
 # Enable YAML-based detection rules
+# When enabled, scans rules_dir for YAML rule files
 enable_yaml_rules = true
 
-# Plugin directories
-detector_plugin_dir = ~/.local/share/tribanft/bruteforce_detector/plugins/detectors
-parser_plugin_dir = ~/.local/share/tribanft/bruteforce_detector/plugins/parsers
-
 # Rules directory for YAML-based detection patterns
-rules_dir = ~/.local/share/tribanft/bruteforce_detector/rules
+# Place your custom .yaml rule files here
+rules_dir = ${paths:project_dir}/bruteforce_detector/rules
 EOF
 
 echo "✓ Configuration updated"
@@ -155,11 +179,16 @@ echo "✓ Configuration updated"
 ### Step 3: Install Python Dependencies
 
 ```bash
-# Install PyYAML if not already installed
-pip3 install --user pyyaml
+# Install required dependencies
+pip3 install --user pyyaml pydantic pydantic-settings
+
+# Install optional dependencies (highly recommended)
+pip3 install --user watchdog  # For real-time log monitoring (v2.3+)
 
 # Verify installation
 python3 -c "import yaml; print('✓ PyYAML installed')"
+python3 -c "import pydantic; print('✓ Pydantic installed')"
+python3 -c "import watchdog; print('✓ watchdog installed')" || echo "⚠ watchdog not installed (real-time monitoring unavailable)"
 ```
 
 ### Step 4: Validate Installation
@@ -169,11 +198,21 @@ python3 -c "import yaml; print('✓ PyYAML installed')"
 python3 -c "
 from bruteforce_detector.core.plugin_manager import PluginManager
 from bruteforce_detector.core.rule_engine import RuleEngine
+from bruteforce_detector.config import get_config
 print('✓ All imports successful')
 "
 
-# Validate YAML rules
+# Validate detector YAML rules
+echo "Validating detector rules..."
 for f in ~/.local/share/tribanft/bruteforce_detector/rules/detectors/*.yaml; do
+    python3 -c "import yaml; yaml.safe_load(open('$f'))" && \
+        echo "✓ $(basename $f) valid" || \
+        echo "✗ $(basename $f) INVALID"
+done
+
+# Validate parser YAML patterns
+echo "Validating parser patterns..."
+for f in ~/.local/share/tribanft/bruteforce_detector/rules/parsers/*.yaml; do
     python3 -c "import yaml; yaml.safe_load(open('$f'))" && \
         echo "✓ $(basename $f) valid" || \
         echo "✗ $(basename $f) INVALID"
@@ -194,12 +233,20 @@ vim ~/.local/share/tribanft/config.conf
 
 # Find and set:
 [features]
-enable_nftables_integration = false  # Disable blocking temporarily
+enable_nftables_update = false  # Disable blocking temporarily
 
 # Keep detection enabled
 enable_prelogin_detection = true
 enable_failed_login_detection = true
 enable_port_scan_detection = true
+enable_crowdsec_integration = true
+
+# Optionally enable real-time monitoring (v2.3+)
+[realtime]
+monitor_syslog = true
+monitor_mssql = true
+monitor_apache = false  # Enable if you have Apache
+monitor_nginx = false   # Enable if you have Nginx
 ```
 
 ### Enable Example YAML Rules
@@ -241,6 +288,80 @@ sudo journalctl --since "7 days ago" | \
 
 # If <100 failures/week, you have low traffic
 # → Use lower thresholds (5-10)
+```
+
+### Configure Real-Time Monitoring (v2.3+)
+
+**Enable for near-instant detection (<2 seconds vs 5 minutes)**:
+
+```bash
+# Edit config.conf
+vim ~/.local/share/tribanft/config.conf
+
+# Add or verify [realtime] section
+[realtime]
+# Enable monitoring for active log sources
+monitor_syslog = true
+monitor_mssql = true
+monitor_apache = true   # If you have Apache
+monitor_nginx = true    # If you have Nginx
+
+# Debounce interval (batch rapid log writes)
+debounce_interval = 1.0
+
+# Rate limiting for DoS protection
+max_events_per_second = 1000
+rate_limit_backoff = 30
+
+# Fallback to periodic mode if inotify unavailable
+fallback_interval = 60
+```
+
+**Install watchdog library** (required for real-time monitoring):
+
+```bash
+pip3 install --user watchdog
+
+# Verify installation
+python3 -c "import watchdog; print('✓ watchdog installed')"
+```
+
+**Note**: If watchdog is unavailable, tribanFT automatically falls back to periodic monitoring (60-second intervals).
+
+### Configure Storage Backend
+
+**Choose between SQLite database or file-based storage**:
+
+```bash
+# Edit config.conf
+vim ~/.local/share/tribanft/config.conf
+
+# Recommended: Use SQLite database (better performance for >1000 IPs)
+[storage]
+use_database = true
+sync_to_file = true  # Keep text files synced for compatibility
+
+# Configure backup settings
+[performance]
+backup_enabled = true
+backup_interval_days = 7     # Only backup if last backup was >7 days ago
+backup_retention_days = 30   # Keep backups for 30 days
+backup_min_keep = 4          # Always keep at least 4 backups
+backup_compress_age_days = 1 # Compress backups older than 1 day
+```
+
+**For large deployments (>10,000 IPs)**:
+
+```bash
+# Optimize for performance
+[storage]
+use_database = true
+sync_to_file = false  # Disable file sync for maximum performance
+
+[performance]
+batch_size = 2000
+backup_interval_days = 7
+backup_retention_days = 30
 ```
 
 ---
@@ -370,13 +491,27 @@ vim ~/.local/share/tribanft/config.conf
 
 # Enable blocking
 [features]
-enable_nftables_integration = true
+enable_nftables_update = true
+
+# Configure NFTables sets
+[nftables]
+nft_bin = /usr/sbin/nft
+blacklist_set = inet filter blacklist_ipv4
+port_scanners_set = inet filter port_scanners
+crowdsec_sets = inet filter crowdsec
+fail2ban_pattern = inet f2b-table addr-set-*
+
+# Optional: Enable NFTables discovery (v2.4+)
+nftables_auto_discovery = false  # Enable to auto-discover all sets
+nftables_event_log_enabled = false  # Enable for audit logging
+# nftables_import_sets = inet:filter:custom_set  # Additional sets to import
 
 # Restart
 sudo systemctl restart tribanft
 
 # Verify NFTables rules
-sudo nft list ruleset | grep -A 10 "set tribanft"
+sudo nft list ruleset | grep -A 10 "blacklist_ipv4"
+sudo nft list set inet filter blacklist_ipv4
 ```
 
 ### Gradual Rollout
@@ -555,8 +690,8 @@ sudo systemctl restart tribanft
 
 ```bash
 # Remove all blocked IPs from NFTables
-sudo nft flush set ip filter tribanft_blacklist_v4
-sudo nft flush set ip6 filter tribanft_blacklist_v6
+sudo nft flush set inet filter blacklist_ipv4
+sudo nft flush set inet filter port_scanners
 
 # Clear blacklist files
 > ~/.local/share/tribanft/blacklist_ipv4.txt
@@ -632,14 +767,76 @@ grep "enable.*detection" ~/.local/share/tribanft/config.conf
 # Check resource usage
 top -p $(pgrep -f tribanft)
 
+# Check database size (if using SQLite)
+du -h ~/.local/share/tribanft/blacklist.db
+# Optimize if large: sqlite3 blacklist.db "VACUUM;"
+
 # Reduce rule complexity
 # - Disable unused rules
 # - Simplify regex patterns
 # - Increase thresholds
 
-# Increase detection interval
+# Optimize storage backend
 vim ~/.local/share/tribanft/config.conf
-# detection_interval_seconds = 600  # Less frequent
+[storage]
+use_database = true
+sync_to_file = false  # Disable file sync for better performance
+
+# Adjust backup settings
+[performance]
+backup_interval_days = 7  # Less frequent backups
+batch_size = 2000  # Larger batches
+
+# Disable real-time monitoring if causing issues
+[realtime]
+monitor_syslog = false
+monitor_mssql = false
+# Falls back to periodic mode
+```
+
+### Real-Time Monitoring Not Working
+
+```bash
+# Check if watchdog is installed
+python3 -c "import watchdog; print('watchdog available')" || \
+    echo "watchdog not installed - install with: pip3 install watchdog"
+
+# Check log file permissions
+ls -la /var/log/syslog
+ls -la /var/opt/mssql/log/errorlog
+
+# Check for inotify errors
+dmesg | grep inotify
+
+# Verify fallback to periodic mode
+sudo journalctl -u tribanft | grep -i "fallback\|periodic"
+
+# Test manually
+python3 -c "
+from watchdog.observers import Observer
+print('✓ inotify available')
+"
+```
+
+### NFTables Integration Not Working
+
+```bash
+# Check NFTables configuration
+sudo nft list ruleset | grep -A 5 "blacklist_ipv4"
+
+# Verify set exists
+sudo nft list set inet filter blacklist_ipv4 || \
+    echo "Set does not exist - create with scripts/setup_nftables.sh"
+
+# Check config
+grep -A 10 "\[nftables\]" ~/.local/share/tribanft/config.conf
+
+# Verify feature enabled
+grep "enable_nftables_update" ~/.local/share/tribanft/config.conf
+
+# Check permissions
+sudo nft list ruleset > /dev/null && echo "✓ NFTables accessible" || \
+    echo "✗ No NFTables permissions - run as root or configure sudo"
 ```
 
 ---
@@ -648,11 +845,13 @@ vim ~/.local/share/tribanft/config.conf
 
 ### Week 1 (Learning Mode)
 - [ ] Service running without errors
-- [ ] All plugins loading successfully
-- [ ] YAML rules loading successfully
+- [ ] All plugins loading successfully (detectors and parsers)
+- [ ] YAML rules loading successfully (detectors and parsers)
 - [ ] Events being parsed from logs
-- [ ] Detections occurring (in logs only)
+- [ ] Detections occurring (in logs only, NFTables disabled)
 - [ ] No critical performance issues
+- [ ] Database initialized (if using SQLite backend)
+- [ ] Real-time monitoring active (or fallback to periodic mode)
 
 ### Week 2 (Tuning Phase)
 - [ ] False positive rate < 5%
@@ -660,14 +859,20 @@ vim ~/.local/share/tribanft/config.conf
 - [ ] Thresholds tuned for environment
 - [ ] Analysis script providing useful insights
 - [ ] No service crashes or errors
+- [ ] Backup system working correctly
+- [ ] Log file paths configured correctly
+- [ ] Parser patterns detecting relevant events
 
 ### Week 3+ (Production)
-- [ ] NFTables integration active
-- [ ] Real attacks being blocked
+- [ ] NFTables integration active and blocking attacks
+- [ ] Real attacks being blocked in real-time
 - [ ] False positive rate < 1%
 - [ ] Service stable and performant
 - [ ] Monitoring and alerting in place
 - [ ] Documentation updated for your environment
+- [ ] CrowdSec/Fail2Ban integration working (if applicable)
+- [ ] IP geolocation enrichment working (if configured)
+- [ ] Backup retention policy optimized
 
 ---
 
