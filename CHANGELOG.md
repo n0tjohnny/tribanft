@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.1] - 2025-12-23
+
+### Documentation & Configuration Enhancement Release
+
+Comprehensive documentation updates and configuration improvements following v2.4.0.
+
+### Added
+
+- **NFTables Setup Script** (`scripts/setup_nftables.sh`)
+  - Automated NFTables configuration for TribanFT
+  - Creates required tables, chains, and sets
+  - Sets up logging for blocked connections
+  - 137 lines of comprehensive setup automation
+
+### Changed
+
+#### Configuration Refactoring
+- **config.py** - Refactored configuration handling
+  - Cleaner code structure
+  - Improved readability and maintainability
+  - Net reduction of 9 lines while maintaining functionality
+
+- **config.conf.template** - Added new configuration options
+  - 6 new configuration parameters
+  - Enhanced NFTables integration settings
+
+#### Manager Improvements
+- **database.py** - Enhanced database manager
+  - Improved error handling
+  - Better logging
+
+- **ipinfo_batch_manager.py** - IPInfo batch processing improvements
+  - Enhanced rate limiting handling
+  - Better error recovery
+
+### Documentation
+
+- **CONFIGURATION.md** - Major expansion (+187 lines)
+  - Enhanced NFTables configuration documentation
+  - Added detailed parameter descriptions
+  - Improved examples and use cases
+
+- **DEPLOYMENT_GUIDE.md** - Comprehensive updates (+275 lines total)
+  - Expanded deployment procedures
+  - Added NFTables setup instructions
+  - Enhanced troubleshooting section
+  - More detailed step-by-step guides
+
+### Impact
+
+- **Easier Deployment**: New setup script automates NFTables configuration
+- **Better Documentation**: Comprehensive guides for all deployment scenarios
+- **Cleaner Code**: Refactored configuration handling
+- **Improved Reliability**: Better error handling in managers
+
+---
+
 ## [2.4.0] - 2025-12-23
 
 ### NFTables Discovery & Extensibility Release
