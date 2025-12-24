@@ -30,13 +30,13 @@ import time
 
 class BlacklistDatabase:
     """SQLite database manager for blacklist storage"""
-    
-    def __init__(self, db_path: str = "/var/lib/tribanft/blacklist.db"):
+
+    def __init__(self, db_path: str):
         """
         Initialize database connection and create tables.
-        
+
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file (from config)
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

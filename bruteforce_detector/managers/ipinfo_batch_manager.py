@@ -45,13 +45,13 @@ class IPInfoBatchManager:
         self.logger.info(f"DEBUG: config.use_database = {config.use_database} (type: {type(config.use_database)})")
 
         self.blacklist_adapter = BlacklistAdapter(config, use_database=config.use_database)
-        
+
         self.api_token = api_token or self._load_token()
         self.base_url = "https://ipinfo.io"
-        
-        # Rate limits
-        self.daily_limit = 2000
-        self.rate_limit_per_minute = 15
+
+        # Rate limits from config
+        self.daily_limit = config.ipinfo_daily_limit
+        self.rate_limit_per_minute = config.ipinfo_rate_limit_per_minute
 
         # Paths from config
         self.cache_dir = Path(config.ipinfo_cache_dir)

@@ -93,30 +93,37 @@ sudo nft list ruleset | head
 **From your local machine** (where you've been developing):
 
 ```bash
-# Create deployment package
-cd /home/jc/Documents/projetos/tribanft
+# Navigate to project directory
+cd /path/to/tribanft
 
-# Exclude unnecessary files
-tar -czf tribanft-phase2.tar.gz \
+# Create deployment package
+tar -czf tribanft-v2.4.0.tar.gz \
     --exclude='*.pyc' \
     --exclude='__pycache__' \
     --exclude='.git' \
     --exclude='*.backup' \
+    --exclude='.claude' \
+    --exclude='others/' \
     bruteforce_detector/ \
     scripts/ \
-    *.md
+    systemd/ \
+    docs/ \
+    config.conf.template \
+    setup.py \
+    README.md \
+    CHANGELOG.md \
+    LICENSE
 
 # Copy to server
-scp tribanft-phase2.tar.gz user@your-server:~/ scp MONITORING_AND_TUNING.md user@your-server:~/
-scp DEPLOYMENT_GUIDE.md user@your-server:~/
+scp tribanft-v2.4.0.tar.gz user@your-server:~/
 ```
 
 **On remote server**:
 
 ```bash
-# Extract new code
+# Extract deployment package
 cd ~
-tar -xzf tribanft-phase2.tar.gz
+tar -xzf tribanft-v2.4.0.tar.gz
 
 # Backup old installation
 sudo mv ~/.local/share/tribanft/bruteforce_detector \
@@ -241,12 +248,29 @@ enable_failed_login_detection = true
 enable_port_scan_detection = true
 enable_crowdsec_integration = true
 
+# Enable verbose logging for initial deployment
+[advanced]
+verbose = true  # Enable debug-level logging
+
 # Optionally enable real-time monitoring (v2.3+)
 [realtime]
 monitor_syslog = true
 monitor_mssql = true
 monitor_apache = false  # Enable if you have Apache
 monitor_nginx = false   # Enable if you have Nginx
+```
+
+**View verbose logs**:
+```bash
+# Live monitoring with verbose output
+sudo journalctl -u tribanft -f
+
+# Show all debug messages since service start
+sudo journalctl -u tribanft --since "1 hour ago" | grep -E "DEBUG|INFO"
+
+# Filter by component
+sudo journalctl -u tribanft | grep "plugin_manager"
+sudo journalctl -u tribanft | grep "rule_engine"
 ```
 
 ### Enable Example YAML Rules

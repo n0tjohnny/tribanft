@@ -295,6 +295,10 @@ class DetectorConfig(BaseSettings):
     ipinfo_cache_dir: Optional[str] = None
     ipinfo_results_file: Optional[str] = None
     ipinfo_csv_cache_file: Optional[str] = None
+    ipinfo_batch_interval: int = 3600
+    ipinfo_batch_size: int = 2000
+    ipinfo_daily_limit: int = 2000
+    ipinfo_rate_limit_per_minute: int = 15
 
     # === Detection Thresholds ===
     brute_force_threshold: int = 20
@@ -467,6 +471,18 @@ class DetectorConfig(BaseSettings):
             except ValueError:
                 logger.warning(f"Invalid integer value for batch_size: {batch_str}")
 
+        # IPInfo settings
+        for field in ['ipinfo_batch_interval', 'ipinfo_batch_size', 'ipinfo_daily_limit', 'ipinfo_rate_limit_per_minute']:
+            # Handle mapping: config file uses shorter names (batch_interval → ipinfo_batch_interval)
+            config_key = field.replace('ipinfo_', '')
+            value_str = _get_from_sources(config_key, config_dict)
+            if value_str is not None:
+                try:
+                    setattr(self, field, int(value_str))
+                    logger.debug(f"DEBUG: CONFIG: {field} = {value_str}")
+                except ValueError:
+                    logger.warning(f"Invalid integer value for {field}: {value_str}")
+
         # Backup settings
         backup_enabled_str = _get_from_sources('backup_enabled', config_dict)
         if backup_enabled_str is not None:
@@ -527,84 +543,52 @@ class DetectorConfig(BaseSettings):
         # Resolve data files with config.conf override support
         if self.blacklist_ipv4_file is None:
             override = _get_from_sources('blacklist_ipv4_file', config_dict)
-            self.blacklist_ipv4_file = override if override else _resolve_file_path(
-                'TRIBANFT_DATA_DIR', data_dir, '/root/blacklist_ipv4.txt',
-                'blacklist_ipv4.txt', config_dict
-            )
+            self.blacklist_ipv4_file = override if override else str(data_dir / 'blacklist_ipv4.txt')
 
         if self.blacklist_ipv6_file is None:
             override = _get_from_sources('blacklist_ipv6_file', config_dict)
-            self.blacklist_ipv6_file = override if override else _resolve_file_path(
-                'TRIBANFT_DATA_DIR', data_dir, '/root/blacklist_ipv6.txt',
-                'blacklist_ipv6.txt', config_dict
-            )
+            self.blacklist_ipv6_file = override if override else str(data_dir / 'blacklist_ipv6.txt')
 
         if self.prelogin_bruteforce_file is None:
             override = _get_from_sources('prelogin_bruteforce_file', config_dict)
-            self.prelogin_bruteforce_file = override if override else _resolve_file_path(
-                'TRIBANFT_DATA_DIR', data_dir, '/root/prelogin-bruteforce-ips.txt',
-                'prelogin-bruteforce-ips.txt', config_dict
-            )
+            self.prelogin_bruteforce_file = override if override else str(data_dir / 'prelogin-bruteforce-ips.txt')
 
         if self.whitelist_file is None:
             override = _get_from_sources('whitelist_file', config_dict)
-            self.whitelist_file = override if override else _resolve_file_path(
-                'TRIBANFT_DATA_DIR', data_dir, '/root/whitelist_ips.txt',
-                'whitelist_ips.txt', config_dict
-            )
+            self.whitelist_file = override if override else str(data_dir / 'whitelist_ips.txt')
 
         if self.manual_blacklist_file is None:
             override = _get_from_sources('manual_blacklist_file', config_dict)
-            self.manual_blacklist_file = override if override else _resolve_file_path(
-                'TRIBANFT_DATA_DIR', data_dir, '/root/manual_blacklist.txt',
-                'manual_blacklist.txt', config_dict
-            )
+            self.manual_blacklist_file = override if override else str(data_dir / 'manual_blacklist.txt')
 
         # Resolve state files
         if self.state_file is None:
             override = _get_from_sources('state_file', config_dict)
-            self.state_file = override if override else _resolve_file_path(
-                'TRIBANFT_STATE_DIR', state_dir, '/var/lib/tribanft/state.json',
-                'state.json', config_dict
-            )
+            self.state_file = override if override else str(state_dir / 'state.json')
 
         if self.database_path is None:
             override = _get_from_sources('database_path', config_dict)
-            self.database_path = override if override else _resolve_file_path(
-                'TRIBANFT_STATE_DIR', state_dir, '/var/lib/tribanft/blacklist.db',
-                'blacklist.db', config_dict
-            )
+            self.database_path = override if override else str(state_dir / 'blacklist.db')
 
         # Resolve IPInfo paths
         if self.ipinfo_token_file is None:
             override = _get_from_sources('token_file', config_dict)
-            self.ipinfo_token_file = override if override else _resolve_file_path(
-                'TRIBANFT_CONFIG_DIR', Path(self.config_dir), '/etc/tribanft/ipinfo_token.txt',
-                'ipinfo_token.txt', config_dict
-            )
+            self.ipinfo_token_file = override if override else str(Path(self.config_dir) / 'ipinfo_token.txt')
             logger.info(f"DEBUG: CONFIG: ipinfo_token_file = {self.ipinfo_token_file}")
 
         if self.ipinfo_cache_dir is None:
             override = _get_from_sources('cache_dir', config_dict)
-            self.ipinfo_cache_dir = override if override else str(
-                state_dir / 'ipinfo_cache'
-            )
+            self.ipinfo_cache_dir = override if override else str(state_dir / 'ipinfo_cache')
             logger.info(f"DEBUG: CONFIG: ipinfo_cache_dir = {self.ipinfo_cache_dir}")
 
         if self.ipinfo_results_file is None:
             override = _get_from_sources('results_file', config_dict)
-            self.ipinfo_results_file = override if override else _resolve_file_path(
-                'TRIBANFT_STATE_DIR', state_dir, '/root/projeto-ip-info-results.json',
-                'ipinfo_results.json', config_dict
-            )
+            self.ipinfo_results_file = override if override else str(state_dir / 'ipinfo_results.json')
             logger.info(f"DEBUG: CONFIG: ipinfo_results_file = {self.ipinfo_results_file}")
 
         if self.ipinfo_csv_cache_file is None:
             override = _get_from_sources('csv_cache_file', config_dict)
-            self.ipinfo_csv_cache_file = override if override else _resolve_file_path(
-                'TRIBANFT_STATE_DIR', state_dir, '/root/projeto-ip-info-results-portscanners-ip4.csv',
-                'ipinfo_results_legacy.csv', config_dict
-            )
+            self.ipinfo_csv_cache_file = override if override else str(state_dir / 'ipinfo_results_legacy.csv')
             logger.info(f"DEBUG: CONFIG: ipinfo_csv_cache_file = {self.ipinfo_csv_cache_file}")
 
         return self

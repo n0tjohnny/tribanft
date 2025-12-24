@@ -213,6 +213,12 @@ batch_interval = 3600
 # Maximum API requests per batch iteration
 batch_size = 2000
 
+# API rate limits (adjust based on your IPInfo.io plan)
+# Free tier: 50,000/month ≈ 1,600/day, 15/minute
+# Basic tier: 250,000/month ≈ 8,000/day, 15/minute
+daily_limit = 2000
+rate_limit_per_minute = 15
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # [nftables] - NFTables Integration Settings
