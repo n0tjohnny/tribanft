@@ -1,0 +1,41 @@
+[Unit]
+Description=TribanFT - Real-Time IP Visibility & Intelligent Blacklist Management
+Documentation=https://github.com/n0tjohnny/tribanft
+After=network.target nftables.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Main service command - runs in real-time daemon mode
+# Automatically uses real-time monitoring (inotify/kqueue) with fallback to periodic mode
+ExecStart=/usr/bin/python3 /usr/local/bin/tribanft --daemon
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Process limits
+LimitNOFILE=65536
+Nice=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tribanft
+
+# Security hardening
+NoNewPrivileges=false
+PrivateTmp=true
+
+# Working directory (matches config.conf.template)
+WorkingDirectory=/root/.local/share/tribanft
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

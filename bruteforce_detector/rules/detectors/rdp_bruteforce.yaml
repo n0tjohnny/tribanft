@@ -1,0 +1,99 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# RDP Bruteforce Detection Rule
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Detects Remote Desktop Protocol (RDP) bruteforce attacks.
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-01-20
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: rdp_bruteforce_detector
+  version: 1.0.0
+  author: TribanFT Project
+  description: Detects RDP bruteforce and credential stuffing attacks
+  enabled: true
+  priority: high
+
+log_sources:
+  parsers:
+    - windows_security
+    - syslog
+
+detection:
+  event_types:
+    - RDP_ATTACK
+    - FAILED_LOGIN
+
+  # RDP attacks typically have fewer attempts but are more targeted
+  threshold: 10
+
+  # Shorter time window for RDP (attacks are usually faster)
+  time_window_minutes: 30
+
+  confidence: high
+
+  patterns:
+    # Windows Event Log - RDP authentication failure
+    - regex: "(?i).*\\brdp\\b.*authentication.*failed?.*"
+      description: "RDP authentication failure"
+      severity: high
+
+    - regex: "(?i).*\\bremote desktop\\b.*failed.*"
+      description: "Remote Desktop connection failed"
+      severity: high
+
+    # CredSSP (Credential Security Support Provider) errors
+    - regex: "(?i).*\\bcredssp\\b.*(error|failed|invalid).*"
+      description: "CredSSP authentication error"
+      severity: high
+
+    # Terminal Services errors
+    - regex: "(?i).*\\bterminal services\\b.*authentication.*failed.*"
+      description: "Terminal Services auth failure"
+      severity: high
+
+    # Event ID 4625 (Windows Security Log)
+    - regex: "(?i).*event\\s*id\\s*:?\\s*4625.*logon type\\s*:?\\s*10.*"
+      description: "Windows Event 4625 - RDP logon failure"
+      severity: critical
+
+    # Event ID 4824 (Kerberos authentication failure)
+    - regex: "(?i).*event\\s*id\\s*:?\\s*4824.*"
+      description: "Kerberos pre-authentication failed (RDP)"
+      severity: high
+
+    # Network Level Authentication (NLA) failures
+    - regex: "(?i).*\\bnla\\b.*(failed|error|denied).*"
+      description: "Network Level Authentication failure"
+      severity: medium
+
+    # Multiple logon failures from same IP
+    - regex: "(?i).*logon.*failed.*3389.*"
+      description: "Failed logon to RDP port (3389)"
+      severity: high
+
+aggregation:
+  group_by: source_ip
+  condition: count >= threshold
+
+output:
+  reason_template: "RDP bruteforce attack: {pattern_description} - {event_count} failed attempts"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. Windows Security Event:
+#    Event ID: 4625 Logon Type: 10 (RemoteInteractive) Source: 1.2.3.4
+#
+# 2. CredSSP error:
+#    CredSSP authentication failed for user Administrator from 1.2.3.4
+#
+# 3. Generic RDP failure:
+#    Remote Desktop authentication failed for 1.2.3.4
+#
+# ═══════════════════════════════════════════════════════════════════════════

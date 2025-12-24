@@ -1,0 +1,46 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# MSSQL Parser Pattern Definitions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Patterns for parsing Microsoft SQL Server error logs.
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-21
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: mssql_parser
+  version: 1.0.0
+  author: TribanFT Project
+  description: MSSQL error log parser patterns for failed login detection
+  log_format: mssql_errorlog
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Groups
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Failed Login Patterns                                               │
+  # └─────────────────────────────────────────────────────────────────────┘
+  failed_login:
+    - regex: 'Login failed for user.*\[CLIENT:\s*([0-9a-fA-F\.:]+)\]'
+      description: 'Login failed (basic)'
+
+    - regex: 'Login failed for user.*Reason:.*\[CLIENT:\s*([0-9a-fA-F\.:]+)\]'
+      description: 'Login failed with reason'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Failed login (basic):
+#   2025-11-20 13:22:32.99 Logon Login failed for user 'sa'. [CLIENT: 1.2.3.4]
+#
+# Failed login with reason:
+#   2025-11-20 13:22:32.99 Logon Login failed for user 'admin'. Reason: Password mismatch. [CLIENT: 1.2.3.4]
+#
+# ═══════════════════════════════════════════════════════════════════════════

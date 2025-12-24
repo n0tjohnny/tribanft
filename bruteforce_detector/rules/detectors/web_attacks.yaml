@@ -1,0 +1,206 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Web Attack Detection Rules
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Detects common web application attacks including:
+# - Cross-Site Scripting (XSS)
+# - Path Traversal / LFI/RFI
+# - Command Injection
+# - Malicious File Uploads
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-22
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Multiple detectors in single file
+detectors:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Cross-Site Scripting (XSS) Detection                                │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: xss_attack_detector
+      version: 1.0.0
+      description: Detects XSS injection attempts
+      enabled: true
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - XSS_ATTACK
+        - HTTP_REQUEST
+
+      # Lower threshold - XSS attacks are often targeted
+      threshold: 3
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        - regex: '(?i)<script[^>]*>'
+          description: 'Script tag injection'
+
+        - regex: '(?i)javascript:'
+          description: 'JavaScript protocol handler'
+
+        - regex: '(?i)on(?:load|error|click|mouse\w+)\s*='
+          description: 'Event handler injection'
+
+        - regex: '(?i)(?:<iframe|<object|<embed)'
+          description: 'Embedded content injection'
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "XSS attack detected: {pattern_description} - {event_count} attempts from {ip}"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Path Traversal / LFI/RFI Detection                                  │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: path_traversal_detector
+      version: 1.0.0
+      description: Detects directory traversal and file inclusion attacks
+      enabled: true
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - PATH_TRAVERSAL
+        - HTTP_REQUEST
+
+      threshold: 5
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        - regex: '(?i)(?:\.\./|\.\.\\){2,}'
+          description: 'Directory traversal sequence'
+
+        - regex: '(?i)/etc/passwd'
+          description: 'Sensitive file access (/etc/passwd)'
+
+        - regex: '(?i)c:\\windows\\system32'
+          description: 'Windows system file access'
+
+        - regex: '(?i)php://(?:filter|input)'
+          description: 'PHP wrapper exploitation'
+
+        - regex: '(?i)\.\.%2f'
+          description: 'URL-encoded traversal'
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Path traversal attack: {pattern_description} - {event_count} attempts from {ip}"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Command Injection Detection                                         │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: command_injection_detector
+      version: 1.0.0
+      description: Detects OS command injection attempts
+      enabled: true
+      priority: high
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - COMMAND_INJECTION
+        - HTTP_REQUEST
+
+      # Very low threshold - command injection is critical
+      threshold: 2
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        - regex: '(?i)(?:;|\||&&|`)\s*(?:rm|wget|curl|bash|sh)'
+          description: 'Shell command injection'
+
+        - regex: '(?i)%0[ad](?:cat|ls|id|whoami)'
+          description: 'URL-encoded command injection'
+
+        - regex: '(?i)\$\(.*(?:cat|id|whoami)'
+          description: 'Command substitution injection'
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Command injection attack: {pattern_description} - {event_count} attempts from {ip}"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Malicious File Upload Detection                                     │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: malicious_upload_detector
+      version: 1.0.0
+      description: Detects malicious file upload attempts
+      enabled: true
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - FILE_UPLOAD_MALICIOUS
+        - HTTP_REQUEST
+
+      threshold: 3
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        - regex: '(?i)\.(?:php|phtml|php3|php4|php5|phar)(?:\?|$|&)'
+          description: 'PHP executable upload'
+
+        - regex: '(?i)\.(?:jsp|asp|aspx)(?:\?|$|&)'
+          description: 'Webshell upload attempt'
+
+        - regex: '(?i)\.(?:jpg|png|gif)\.php'
+          description: 'Double extension upload'
+
+        - regex: '(?i)\.svg.*<script'
+          description: 'SVG with embedded script'
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Malicious file upload: {pattern_description} - {event_count} attempts from {ip}"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. XSS attack:
+#    1.2.3.4 - - [22/Dec/2025:14:30:00] "GET /search?q=<script>alert(1)</script> HTTP/1.1" 200
+#
+# 2. Path traversal:
+#    1.2.3.4 - - [22/Dec/2025:14:31:00] "GET /download?file=../../etc/passwd HTTP/1.1" 200
+#
+# 3. Command injection:
+#    1.2.3.4 - - [22/Dec/2025:14:32:00] "GET /ping?host=8.8.8.8;cat%20/etc/passwd HTTP/1.1" 200
+#
+# 4. Malicious upload:
+#    1.2.3.4 - - [22/Dec/2025:14:33:00] "POST /upload/shell.php HTTP/1.1" 200
+#
+# ═══════════════════════════════════════════════════════════════════════════
