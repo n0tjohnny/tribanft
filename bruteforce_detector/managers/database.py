@@ -26,6 +26,7 @@ import json
 import logging
 import ipaddress
 import time
+from contextlib import contextmanager
 
 
 class BlacklistDatabase:
@@ -42,6 +43,26 @@ class BlacklistDatabase:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
         self._init_db()
+
+    @contextmanager
+    def _query_timer(self, operation: str):
+        """
+        Context manager for query performance logging (debug mode only).
+
+        Usage:
+            with self._query_timer("get_all_ips"):
+                result = conn.execute(query)
+
+        Args:
+            operation: Description of the operation being timed
+        """
+        start_time = time.perf_counter()
+        try:
+            yield
+        finally:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(f"[PERF] {operation}: {elapsed_ms:.2f}ms")
     
     def _init_db(self):
         """Create database tables and indexes if they don't exist."""
@@ -72,7 +93,10 @@ class BlacklistDatabase:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source ON blacklist(source)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_country ON blacklist(country)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_version ON blacklist(ip_version)")
-            
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_event_count ON blacklist(event_count DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_date_added ON blacklist(date_added DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_last_seen ON blacklist(last_seen DESC)")
+
             conn.commit()
     
     def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
@@ -102,36 +126,37 @@ class BlacklistDatabase:
         for attempt in range(max_retries):
             try:
                 added = 0
-                
+
                 # Use timeout and IMMEDIATE transaction for write lock
                 with sqlite3.connect(self.db_path, timeout=10.0) as conn:
-                    # Begin IMMEDIATE transaction to acquire write lock immediately
-                    conn.execute("BEGIN IMMEDIATE")
-                    
-                    for ip_str, info in ips_info.items():
-                        try:
-                            ip = ipaddress.ip_address(ip_str)
+                    with self._query_timer(f"bulk_add({len(ips_info)} IPs)"):
+                        # Begin IMMEDIATE transaction to acquire write lock immediately
+                        conn.execute("BEGIN IMMEDIATE")
 
-                            # Check if IP already exists
-                            existing = conn.execute(
-                                "SELECT * FROM blacklist WHERE ip = ?",
-                                (ip_str,)
-                            ).fetchone()
+                        for ip_str, info in ips_info.items():
+                            try:
+                                ip = ipaddress.ip_address(ip_str)
 
-                            if existing:
-                                # UPDATE: update only provided fields
-                                self._update_existing_ip(conn, ip_str, info, existing)
-                            else:
-                                # INSERT: new complete IP record
-                                self._insert_new_ip(conn, ip_str, ip, info)
-                            
-                            added += 1
-                            
-                        except Exception as e:
-                            self.logger.warning(f"Skipped {ip_str}: {e}")
-                            continue
-                    
-                    conn.commit()
+                                # Check if IP already exists
+                                existing = conn.execute(
+                                    "SELECT * FROM blacklist WHERE ip = ?",
+                                    (ip_str,)
+                                ).fetchone()
+
+                                if existing:
+                                    # UPDATE: update only provided fields
+                                    self._update_existing_ip(conn, ip_str, info, existing)
+                                else:
+                                    # INSERT: new complete IP record
+                                    self._insert_new_ip(conn, ip_str, ip, info)
+
+                                added += 1
+
+                            except Exception as e:
+                                self.logger.warning(f"Skipped {ip_str}: {e}")
+                                continue
+
+                        conn.commit()
                 
                 # Success - return result
                 return added
@@ -331,7 +356,10 @@ class BlacklistDatabase:
         ips = {}
 
         with sqlite3.connect(self.db_path) as conn:
-            for row in conn.execute(query, params):
+            with self._query_timer(f"get_all_ips(ip_version={ip_version})"):
+                rows = conn.execute(query, params).fetchall()
+
+            for row in rows:
                 try:
                     # Parse timestamps back to datetime objects
                     first_seen = datetime.fromisoformat(row[9]) if row[9] else None
@@ -377,42 +405,242 @@ class BlacklistDatabase:
     def get_statistics(self) -> Dict:
         """
         Calculate database statistics.
-        
+
         Returns:
             Dict with IP counts, geolocation coverage, event totals
         """
         with sqlite3.connect(self.db_path) as conn:
-            stats = {
-                'total_ips': conn.execute(
-                    "SELECT COUNT(*) FROM blacklist"
-                ).fetchone()[0],
-                
-                'ipv4': conn.execute(
-                    "SELECT COUNT(*) FROM blacklist WHERE ip_version=4"
-                ).fetchone()[0],
-                
-                'ipv6': conn.execute(
-                    "SELECT COUNT(*) FROM blacklist WHERE ip_version=6"
-                ).fetchone()[0],
-                
-                'with_geolocation': conn.execute(
-                    "SELECT COUNT(*) FROM blacklist WHERE country IS NOT NULL"
-                ).fetchone()[0],
-                
-                'total_events': conn.execute(
-                    "SELECT SUM(event_count) FROM blacklist"
-                ).fetchone()[0] or 0
-            }
-            
-            # Count by source
-            by_source = {}
-            for row in conn.execute("SELECT source, COUNT(*) FROM blacklist GROUP BY source"):
-                by_source[row[0] or 'unknown'] = row[1]
-            
-            stats['by_source'] = by_source
-            
-            return stats
-    
+            with self._query_timer("get_statistics"):
+                stats = {
+                    'total_ips': conn.execute(
+                        "SELECT COUNT(*) FROM blacklist"
+                    ).fetchone()[0],
+
+                    'ipv4': conn.execute(
+                        "SELECT COUNT(*) FROM blacklist WHERE ip_version=4"
+                    ).fetchone()[0],
+
+                    'ipv6': conn.execute(
+                        "SELECT COUNT(*) FROM blacklist WHERE ip_version=6"
+                    ).fetchone()[0],
+
+                    'with_geolocation': conn.execute(
+                        "SELECT COUNT(*) FROM blacklist WHERE country IS NOT NULL"
+                    ).fetchone()[0],
+
+                    'total_events': conn.execute(
+                        "SELECT SUM(event_count) FROM blacklist"
+                    ).fetchone()[0] or 0
+                }
+
+                # Count by source
+                by_source = {}
+                for row in conn.execute("SELECT source, COUNT(*) FROM blacklist GROUP BY source"):
+                    by_source[row[0] or 'unknown'] = row[1]
+
+                stats['by_source'] = by_source
+
+                return stats
+
+    def query_by_attack_type(self, event_type: str) -> Dict[str, Dict]:
+        """
+        Query IPs by attack/event type.
+
+        Uses the event_types stored in metadata JSON field.
+
+        Args:
+            event_type: EventType to filter by (e.g., "sql_injection", "ssh_attack")
+
+        Returns:
+            Dict mapping IP string to metadata dict
+        """
+        ips = {}
+
+        with sqlite3.connect(self.db_path) as conn:
+            with self._query_timer(f"query_by_attack_type({event_type})"):
+                # Query all IPs and filter by event_type in metadata
+                for row in conn.execute("SELECT * FROM blacklist"):
+                    try:
+                        # Parse metadata JSON
+                        metadata_json = row[12]
+                        if metadata_json:
+                            metadata = json.loads(metadata_json)
+                            event_types = metadata.get('event_types', [])
+
+                            # Check if event_type matches (case-insensitive)
+                            if any(et.lower() == event_type.lower() for et in event_types):
+                                # Parse timestamps
+                                first_seen = datetime.fromisoformat(row[9]) if row[9] else None
+                                last_seen = datetime.fromisoformat(row[10]) if row[10] else None
+                                date_added = datetime.fromisoformat(row[11]) if row[11] else None
+
+                                # Build IP info dict
+                                ips[row[0]] = {
+                                    'ip': ipaddress.ip_address(row[0]),
+                                    'reason': row[2],
+                                    'confidence': row[3],
+                                    'event_count': row[4],
+                                    'source': row[5],
+                                    'first_seen': first_seen,
+                                    'last_seen': last_seen,
+                                    'date_added': date_added,
+                                    'event_types': event_types,
+                                    'metadata': metadata,
+                                    'geolocation': {
+                                        'country': row[6],
+                                        'city': row[7],
+                                        'isp': row[8]
+                                    } if row[6] else None
+                                }
+
+                    except (json.JSONDecodeError, Exception) as e:
+                        self.logger.debug(f"Error parsing row for {row[0]}: {e}")
+                        continue
+
+        return ips
+
+    def query_by_timerange(self, start_date: Optional[datetime] = None,
+                          end_date: Optional[datetime] = None) -> Dict[str, Dict]:
+        """
+        Query IPs by time range (date_added field).
+
+        Args:
+            start_date: Start of time range (inclusive)
+            end_date: End of time range (inclusive)
+
+        Returns:
+            Dict mapping IP string to metadata dict
+        """
+        query = "SELECT * FROM blacklist WHERE 1=1"
+        params = []
+
+        if start_date:
+            query += " AND date_added >= ?"
+            params.append(start_date.isoformat())
+
+        if end_date:
+            query += " AND date_added <= ?"
+            params.append(end_date.isoformat())
+
+        # Order by date_added DESC (uses idx_date_added index)
+        query += " ORDER BY date_added DESC"
+
+        ips = {}
+
+        with sqlite3.connect(self.db_path) as conn:
+            with self._query_timer(f"query_by_timerange({start_date} to {end_date})"):
+                rows = conn.execute(query, params).fetchall()
+
+            for row in rows:
+                try:
+                    # Parse timestamps
+                    first_seen = datetime.fromisoformat(row[9]) if row[9] else None
+                    last_seen = datetime.fromisoformat(row[10]) if row[10] else None
+                    date_added = datetime.fromisoformat(row[11]) if row[11] else None
+
+                    # Parse metadata JSON
+                    metadata = {}
+                    event_types = []
+
+                    try:
+                        if row[12]:
+                            metadata = json.loads(row[12])
+                            event_types = metadata.get('event_types', [])
+                    except json.JSONDecodeError:
+                        pass
+
+                    # Build IP info dict
+                    ips[row[0]] = {
+                        'ip': ipaddress.ip_address(row[0]),
+                        'reason': row[2],
+                        'confidence': row[3],
+                        'event_count': row[4],
+                        'source': row[5],
+                        'first_seen': first_seen,
+                        'last_seen': last_seen,
+                        'date_added': date_added,
+                        'event_types': event_types,
+                        'metadata': metadata,
+                        'geolocation': {
+                            'country': row[6],
+                            'city': row[7],
+                            'isp': row[8]
+                        } if row[6] else None
+                    }
+
+                except Exception as e:
+                    self.logger.warning(f"Error parsing row for {row[0]}: {e}")
+                    continue
+
+        return ips
+
+    def query_top_ips(self, limit: int = 100, order_by: str = 'event_count') -> Dict[str, Dict]:
+        """
+        Query top IPs ordered by event_count or date_added.
+
+        Args:
+            limit: Maximum number of IPs to return
+            order_by: Field to order by ('event_count' or 'date_added')
+
+        Returns:
+            Dict mapping IP string to metadata dict
+        """
+        # Validate order_by parameter
+        if order_by not in ['event_count', 'date_added']:
+            order_by = 'event_count'
+
+        # Use appropriate index (idx_event_count or idx_date_added)
+        query = f"SELECT * FROM blacklist ORDER BY {order_by} DESC LIMIT ?"
+
+        ips = {}
+
+        with sqlite3.connect(self.db_path) as conn:
+            with self._query_timer(f"query_top_ips(limit={limit}, order_by={order_by})"):
+                rows = conn.execute(query, (limit,)).fetchall()
+
+            for row in rows:
+                try:
+                    # Parse timestamps
+                    first_seen = datetime.fromisoformat(row[9]) if row[9] else None
+                    last_seen = datetime.fromisoformat(row[10]) if row[10] else None
+                    date_added = datetime.fromisoformat(row[11]) if row[11] else None
+
+                    # Parse metadata JSON
+                    metadata = {}
+                    event_types = []
+
+                    try:
+                        if row[12]:
+                            metadata = json.loads(row[12])
+                            event_types = metadata.get('event_types', [])
+                    except json.JSONDecodeError:
+                        pass
+
+                    # Build IP info dict
+                    ips[row[0]] = {
+                        'ip': ipaddress.ip_address(row[0]),
+                        'reason': row[2],
+                        'confidence': row[3],
+                        'event_count': row[4],
+                        'source': row[5],
+                        'first_seen': first_seen,
+                        'last_seen': last_seen,
+                        'date_added': date_added,
+                        'event_types': event_types,
+                        'metadata': metadata,
+                        'geolocation': {
+                            'country': row[6],
+                            'city': row[7],
+                            'isp': row[8]
+                        } if row[6] else None
+                    }
+
+                except Exception as e:
+                    self.logger.warning(f"Error parsing row for {row[0]}: {e}")
+                    continue
+
+        return ips
+
     def backup(self):
         """Create daily database backup."""
         backup_path = Path(str(self.db_path) + f".backup.{datetime.now().strftime('%Y%m%d')}")

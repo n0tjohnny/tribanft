@@ -71,6 +71,12 @@ ftp_log_path = /var/log/vsftpd.log
 #               /var/log/maillog (RedHat/CentOS/Fedora)
 smtp_log_path = /var/log/mail.log
 
+# DNS server log (BIND9, dnsmasq, Unbound, systemd-resolved)
+# Common paths: /var/log/named/query.log (BIND9)
+#               /var/log/dnsmasq.log (dnsmasq)
+#               /var/log/unbound.log (Unbound)
+dns_log_path = /var/log/named/query.log
+
 # TribanFT application log (auto-generated in state_dir if not specified)
 app_log_path = ${paths:state_dir}/tribanft.log
 
@@ -418,3 +424,56 @@ rules_dir = ${paths:project_dir}/bruteforce_detector/rules
 # threshold = 15
 # time_window = 120
 # custom_parameter = value
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [threat_intelligence] - Threat Feed Integration (NEW in v2.5)
+# ═══════════════════════════════════════════════════════════════════════════
+[threat_intelligence]
+
+# Enable threat feed integration
+# When enabled, TribanFT queries external threat intelligence sources
+# for known malicious IPs and imports them into the blacklist
+# Default: false (requires API keys and configuration)
+threat_feeds_enabled = false
+
+# Comma-separated list of threat feed sources to query
+# Available sources:
+#   - spamhaus:    Spamhaus DROP/EDROP lists (free, no API key needed)
+#   - abuseipdb:   AbuseIPDB community database (requires API key)
+#   - alienvault:  AlienVault OTX threat intelligence (requires API key)
+#
+# Recommended: Start with spamhaus only (free, no registration)
+# Example: threat_feed_sources = spamhaus
+# Example: threat_feed_sources = spamhaus,abuseipdb
+threat_feed_sources = spamhaus
+
+# Cache duration for threat feed results (hours)
+# How long to cache feed results before querying again
+# Reduces API calls and respects rate limits
+# Default: 24 hours
+threat_feed_cache_hours = 24
+
+# ───────────────────────────────────────────────────────────────────────────
+# API Key Configuration
+# ───────────────────────────────────────────────────────────────────────────
+
+# AbuseIPDB API key file location (optional, only if using abuseipdb feed)
+# Get a free API key at: https://www.abuseipdb.com/
+# Free tier: 1,000 checks/day
+# Save your API key to this file (one line, plain text)
+# abuseipdb_api_key_file = ${paths:config_dir}/abuseipdb_key.txt
+
+# AlienVault OTX API key file location (optional, only if using alienvault feed)
+# Get a free API key at: https://otx.alienvault.com/
+# Save your API key to this file (one line, plain text)
+# alienvault_api_key_file = ${paths:config_dir}/alienvault_key.txt
+
+# ───────────────────────────────────────────────────────────────────────────
+# Notes
+# ───────────────────────────────────────────────────────────────────────────
+# 1. Spamhaus DROP/EDROP lists are free and do not require API keys
+# 2. AbuseIPDB and AlienVault require free registration for API keys
+# 3. Threat feed results are cached to minimize API calls
+# 4. Existing blacklisted IPs are not re-imported (automatic deduplication)
+# 5. See bruteforce_detector/rules/detectors/threat_intelligence.yaml for details

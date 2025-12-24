@@ -1,0 +1,173 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Threat Intelligence Detection Rules
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Integrates with external threat feeds to detect known malicious IPs:
+# - AbuseIPDB: Community-driven IP abuse database
+# - Spamhaus DROP/EDROP: Known spam/malware sources
+# - AlienVault OTX: Open Threat Exchange indicators
+#
+# These detectors query external APIs rather than processing logs.
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-24
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+detectors:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Threat Feed Detection                                                │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: threat_feed_detector
+      version: 1.0.0
+      description: Detects known malicious IPs from threat intelligence feeds
+      enabled: false  # Disabled by default (requires API keys and configuration)
+      priority: high
+
+    # NOTE: This detector does NOT process log events
+    # It queries external threat feeds directly via:
+    #   - bruteforce_detector/plugins/detectors/threat_feed.py
+    #
+    # To enable:
+    #   1. Set threat_feeds_enabled = true in config.conf
+    #   2. Configure threat_feed_sources (e.g., "spamhaus,abuseipdb")
+    #   3. Add API keys if using AbuseIPDB or AlienVault OTX
+    #   4. Set enabled: true in this file
+
+    detection:
+      event_types:
+        - KNOWN_MALICIOUS_IP
+
+      # Threat feeds return IPs with confidence scores
+      # Threshold=1 means "block immediately if found in any feed"
+      threshold: 1
+      time_window_minutes: 1440  # 24 hours (deduplication window)
+      confidence: high
+
+      patterns: []  # No regex patterns (external API queries)
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "Known malicious IP from threat feed: {reason}"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Configuration Instructions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Step 1: Enable Threat Feeds in config.conf
+# ──────────────────────────────────────────
+# Add to your config.conf:
+#
+# [threat_intelligence]
+# threat_feeds_enabled = true
+# threat_feed_sources = spamhaus,abuseipdb,alienvault
+# threat_feed_cache_hours = 24
+#
+# Step 2: Configure API Keys (if needed)
+# ───────────────────────────────────────
+# AbuseIPDB (free tier: 1,000 checks/day):
+#   1. Register at https://www.abuseipdb.com/
+#   2. Get your API key
+#   3. Save to: ~/.local/share/tribanft/abuseipdb_key.txt
+#
+# AlienVault OTX (free):
+#   1. Register at https://otx.alienvault.com/
+#   2. Get your API key
+#   3. Configure in threat_feed.py (TBD)
+#
+# Spamhaus (no API key needed):
+#   - Uses publicly available DROP/EDROP lists
+#   - No registration required
+#
+# Step 3: Enable This Detector
+# ─────────────────────────────
+# Set enabled: true in this file
+#
+# Step 4: Restart TribanFT
+# ────────────────────────
+# sudo systemctl restart tribanft
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# How Threat Feed Detection Works
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. Detector queries configured threat feeds periodically
+# 2. Each feed returns known malicious IP addresses
+# 3. Results are cached to minimize API calls (24 hours by default)
+# 4. New malicious IPs are compared against existing blacklist
+# 5. Only NEW malicious IPs are added to blacklist
+# 6. Duplicate detections are filtered to avoid re-blocking
+#
+# Caching Strategy:
+# ─────────────────
+# - Threat feed results cached in: ~/.local/share/tribanft/threat_feed_cache.json
+# - Cache expiry: 24 hours (configurable via threat_feed_cache_hours)
+# - Cache prevents redundant API calls (important for rate-limited APIs)
+#
+# Rate Limiting:
+# ──────────────
+# - AbuseIPDB Free: 1,000 checks/day
+# - Spamhaus: No API (public lists, no rate limit)
+# - AlienVault OTX: 10,000 requests/hour
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Recommended Feed Sources
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# For All Users:
+# ──────────────
+# threat_feed_sources = spamhaus
+#   - Free, no registration
+#   - High-quality DROP/EDROP lists
+#   - Updated daily
+#   - Covers known spam/malware sources
+#
+# For Users with Low Traffic (<1,000 IPs/day):
+# ─────────────────────────────────────────────
+# threat_feed_sources = spamhaus,abuseipdb
+#   - Spamhaus (free, no limit)
+#   - AbuseIPDB (free tier: 1,000 checks/day)
+#   - Good coverage for most threats
+#
+# For Users Needing Maximum Protection:
+# ──────────────────────────────────────
+# threat_feed_sources = spamhaus,abuseipdb,alienvault
+#   - Spamhaus (free)
+#   - AbuseIPDB (requires paid plan for >1,000/day)
+#   - AlienVault OTX (free, 10,000 req/hour)
+#   - Comprehensive threat intelligence
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Threat Feed Results
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Scenario 1: Spamhaus DROP List
+# ───────────────────────────────
+# Feed returns: 1.2.3.0/24 (CIDR block)
+# Detector parses: Individual IPs in range
+# Result: All IPs in 1.2.3.0/24 added to blacklist
+# Reason: "Known malicious IP from Spamhaus DROP (SBL12345)"
+#
+# Scenario 2: AbuseIPDB High Confidence
+# ──────────────────────────────────────
+# API returns: IP 5.6.7.8, abuse confidence: 95%, reports: 150
+# Result: 5.6.7.8 added to blacklist
+# Reason: "Known malicious IP from AbuseIPDB (95% confidence, 150 reports)"
+#
+# Scenario 3: AlienVault OTX Indicator
+# ─────────────────────────────────────
+# OTX returns: IP 9.10.11.12, indicator: malware C&C server
+# Result: 9.10.11.12 added to blacklist
+# Reason: "Known malicious IP from AlienVault OTX (malware C&C)"
+#
+# ═══════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,244 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# DNS Parser Pattern Definitions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Patterns for parsing DNS server logs (BIND9, dnsmasq, Unbound, systemd-resolved).
+#
+# Detects:
+# - DNS amplification attacks (ANY queries)
+# - DNS tunneling (suspicious subdomain patterns)
+# - Subdomain brute force (rapid NXDOMAIN)
+# - Zone transfer attempts (AXFR/IXFR)
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-24
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: dns
+  version: 1.0.0
+  author: TribanFT Project
+  description: DNS server log parser patterns for attack detection
+  log_format: dns_log
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Groups
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ DNS Attack Patterns                                                  │
+  # └─────────────────────────────────────────────────────────────────────┘
+  dns_attacks:
+    # ─────────────────────────────────────────────────────────────────────
+    # DNS Amplification Attacks (ANY queries)
+    # ─────────────────────────────────────────────────────────────────────
+    # Attackers use ANY queries to amplify response size
+    # Small request → Large response (amplification factor: 50-100x)
+    # Common in DDoS attacks
+
+    # BIND9 format: client 1.2.3.4#12345: query: example.com IN ANY
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query.*\s+ANY\s'
+      description: 'DNS amplification (ANY query - BIND9)'
+
+    # dnsmasq format: query[ANY] example.com from 1.2.3.4
+    - regex: 'query\[ANY\].*from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'DNS amplification (ANY query - dnsmasq)'
+
+    # Unbound format: 1.2.3.4 example.com. IN ANY
+    - regex: '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+\S+\s+IN\s+ANY'
+      description: 'DNS amplification (ANY query - Unbound)'
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Zone Transfer Attempts (AXFR/IXFR)
+    # ─────────────────────────────────────────────────────────────────────
+    # Unauthorized zone transfer attempts (reconnaissance)
+    # Reveals all DNS records in a zone
+
+    # BIND9 AXFR: client 1.2.3.4#12345: query: example.com IN AXFR
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query.*\s+AXFR\s'
+      description: 'Zone transfer attempt (AXFR - BIND9)'
+
+    # BIND9 IXFR: client 1.2.3.4#12345: query: example.com IN IXFR
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query.*\s+IXFR\s'
+      description: 'Zone transfer attempt (IXFR - BIND9)'
+
+    # dnsmasq format: query[AXFR] example.com from 1.2.3.4
+    - regex: 'query\[AXFR\].*from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Zone transfer attempt (AXFR - dnsmasq)'
+
+    - regex: 'query\[IXFR\].*from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Zone transfer attempt (IXFR - dnsmasq)'
+
+    # ─────────────────────────────────────────────────────────────────────
+    # DNS Tunneling Detection
+    # ─────────────────────────────────────────────────────────────────────
+    # Attackers encode data in subdomain labels
+    # Characteristics: Long subdomains, high entropy, rapid queries
+
+    # Suspiciously long subdomain (>50 chars in a label)
+    # BIND9: client 1.2.3.4#12345: query: aaaabbbbccccddddeeeeffffgggghhhhiiiijjjj.example.com
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query:\s+[a-z0-9]{50,}\.'
+      description: 'DNS tunneling (long subdomain - BIND9)'
+
+    # dnsmasq: query[A] aaaabbbbccccddddeeeeffffgggghhhhiiiijjjj.example.com from 1.2.3.4
+    - regex: 'query\[[A-Z]+\]\s+[a-z0-9]{50,}\..*from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'DNS tunneling (long subdomain - dnsmasq)'
+
+    # Base64-like patterns in subdomains (tunneling indicator)
+    # BIND9: client 1.2.3.4#12345: query: SGVsbG8gV29ybGQ.example.com
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query:\s+[A-Za-z0-9+/=]{20,}\.'
+      description: 'DNS tunneling (Base64 pattern - BIND9)'
+
+    # Hex-encoded subdomains (another tunneling pattern)
+    # BIND9: client 1.2.3.4#12345: query: 48656c6c6f.example.com
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query:\s+[0-9a-f]{30,}\.'
+      description: 'DNS tunneling (hex pattern - BIND9)'
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Subdomain Brute Force Detection
+    # ─────────────────────────────────────────────────────────────────────
+    # Attackers enumerate subdomains (reconnaissance)
+    # Rapid NXDOMAIN responses indicate brute forcing
+
+    # BIND9: client 1.2.3.4#12345: query (cache) 'subdomain.example.com/A/IN' denied
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query.*denied'
+      description: 'Subdomain brute force (query denied - BIND9)'
+
+    # BIND9 NXDOMAIN: client 1.2.3.4#12345: query: nonexistent.example.com IN A
+    # (NXDOMAIN logged separately, this catches the query)
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query:\s+\w+\.\w+\.\w+\s+IN'
+      description: 'Potential subdomain brute force (BIND9)'
+
+    # dnsmasq NXDOMAIN: config nonexistent.example.com is NXDOMAIN from 1.2.3.4
+    - regex: 'NXDOMAIN.*from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Subdomain brute force (NXDOMAIN - dnsmasq)'
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Suspicious Query Types
+    # ─────────────────────────────────────────────────────────────────────
+    # Other potentially malicious query patterns
+
+    # Excessive TXT queries (sometimes used in tunneling)
+    # BIND9: client 1.2.3.4#12345: query: example.com IN TXT
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query.*\s+TXT\s'
+      description: 'Suspicious TXT query (potential tunneling - BIND9)'
+
+    # NULL record queries (rare, potentially malicious)
+    - regex: 'client\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}).*query.*\s+NULL\s'
+      description: 'Suspicious NULL query (BIND9)'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Notes
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# DNS Amplification Detection:
+# ───────────────────────────
+# - ANY queries are legitimate but rare in normal traffic
+# - Threshold recommendation: 5+ ANY queries from same IP = attack
+# - Amplification factor: 50-100x (28 byte request → 3000 byte response)
+#
+# Zone Transfer Detection:
+# ────────────────────────
+# - AXFR/IXFR should ONLY come from secondary nameservers
+# - Whitelist your secondary NS IPs in config
+# - Any other AXFR/IXFR = unauthorized reconnaissance
+#
+# DNS Tunneling Detection:
+# ────────────────────────
+# - Long subdomains (>50 chars) are highly suspicious
+# - Base64/hex patterns indicate encoded data
+# - High query rate from single IP = tunneling
+# - Legitimate long subdomains: whitelist specific domains
+#
+# Subdomain Brute Force:
+# ──────────────────────
+# - Rapid NXDOMAIN responses indicate enumeration
+# - Tools: dnsrecon, fierce, sublist3r
+# - Threshold: 20+ NXDOMAIN in 60 seconds = brute force
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# BIND9 Examples:
+# ───────────────
+# 22-Dec-2025 10:30:15.123 queries: info: client 1.2.3.4#12345: query: example.com IN ANY +E(0) (192.168.1.1)
+# 22-Dec-2025 10:30:16.456 queries: info: client 1.2.3.4#12345: query: example.com IN AXFR +E(0) (192.168.1.1)
+# 22-Dec-2025 10:30:17.789 queries: info: client 1.2.3.4#12345: query: aaaabbbbccccddddeeeeffffgggghhhhiiiijjjj.example.com IN A +E(0)
+#
+# dnsmasq Examples:
+# ─────────────────
+# Dec 22 10:30:15 dnsmasq[1234]: query[ANY] example.com from 1.2.3.4
+# Dec 22 10:30:16 dnsmasq[1234]: query[AXFR] example.com from 1.2.3.4
+# Dec 22 10:30:17 dnsmasq[1234]: config nonexistent.example.com is NXDOMAIN from 1.2.3.4
+#
+# Unbound Examples:
+# ─────────────────
+# [2025-12-22 10:30:15] unbound[1234]: 1.2.3.4 example.com. IN ANY
+# [2025-12-22 10:30:16] unbound[1234]: 1.2.3.4 example.com. IN AXFR
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Detection Rule Recommendations
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Create detection rule in: bruteforce_detector/rules/detectors/dns_attacks.yaml
+#
+# Example aggressive rule:
+# ───────────────────────
+# - metadata:
+#     name: dns_amplification_detector
+#     description: Detects DNS amplification attacks
+#     enabled: true
+#   detection:
+#     event_types: [DNS_ATTACK]
+#     threshold: 5   # 5 ANY queries = block
+#     time_window_minutes: 10
+#     confidence: high
+#   aggregation:
+#     group_by: source_ip
+#
+# Example conservative rule:
+# ─────────────────────────
+# - metadata:
+#     name: dns_amplification_detector
+#     description: Detects DNS amplification attacks
+#     enabled: true
+#   detection:
+#     event_types: [DNS_ATTACK]
+#     threshold: 10  # Require more evidence before blocking
+#     time_window_minutes: 30
+#     confidence: medium
+#   aggregation:
+#     group_by: source_ip
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# False Positive Prevention
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Whitelist Legitimate Scanners:
+# ──────────────────────────────
+# - Add security scanners to whitelist_ips.txt
+# - Example: 192.168.1.100 (internal security scanner)
+#
+# Whitelist Secondary Nameservers:
+# ─────────────────────────────────
+# - AXFR/IXFR from secondary NS is legitimate
+# - Add their IPs to whitelist_ips.txt
+#
+# Whitelist Known Monitoring Services:
+# ─────────────────────────────────────
+# - DNS monitoring tools may trigger false positives
+# - Examples: Uptime Robot, Pingdom, StatusCake
+# - Add their IP ranges to whitelist
+#
+# ═══════════════════════════════════════════════════════════════════════════

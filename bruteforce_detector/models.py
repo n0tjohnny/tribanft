@@ -59,6 +59,7 @@ class EventType(Enum):
         SSH_ATTACK: SSH bruteforce or exploitation
         FTP_ATTACK: FTP bruteforce or exploitation
         SMTP_ATTACK: SMTP abuse or attacks
+        DNS_ATTACK: DNS attacks (amplification, tunneling, subdomain brute force)
 
     Threat Intelligence:
         CROWDSEC_BLOCK: IPs blocked by CrowdSec
@@ -95,6 +96,7 @@ class EventType(Enum):
     SSH_ATTACK = "ssh_attack"
     FTP_ATTACK = "ftp_attack"
     SMTP_ATTACK = "smtp_attack"
+    DNS_ATTACK = "dns_attack"
 
     # Threat Intelligence
     CROWDSEC_BLOCK = "crowdsec_block"

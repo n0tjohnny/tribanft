@@ -562,10 +562,14 @@ def main():
     parser.add_argument('--query-ip', type=str, metavar='IP', help='Query detailed information about a specific IP')
     parser.add_argument('--query-country', type=str, metavar='COUNTRY', help='List IPs from a specific country')
     parser.add_argument('--query-reason', type=str, metavar='REASON', help='Search IPs by block reason (partial match)')
+    parser.add_argument('--query-attack-type', type=str, metavar='TYPE', help='Filter IPs by attack/event type (e.g., sql_injection, ssh_attack)')
+    parser.add_argument('--query-timerange', type=str, metavar='RANGE', help='Filter IPs by time range (format: "2025-12-01 to 2025-12-24" or "last 7 days")')
     parser.add_argument('--list-countries', action='store_true', help='List all countries with IP counts')
     parser.add_argument('--list-sources', action='store_true', help='List all detection sources with counts')
     parser.add_argument('--top-threats', type=int, metavar='N', help='Show top N IPs by event count')
     parser.add_argument('--export-csv', type=str, metavar='FILE', help='Export blacklist to CSV file')
+    parser.add_argument('--export-json', type=str, metavar='FILE', help='Export blacklist to JSON file')
+    parser.add_argument('--live-monitor', action='store_true', help='Monitor threats in real-time (live stream)')
 
     args = parser.parse_args()
     
@@ -680,7 +684,9 @@ def main():
         sys.exit(0)
 
     # Query commands
-    elif args.query_ip or args.query_country or args.query_reason or args.list_countries or args.list_sources or args.top_threats or args.export_csv:
+    elif (args.query_ip or args.query_country or args.query_reason or args.query_attack_type or
+          args.query_timerange or args.list_countries or args.list_sources or args.top_threats or
+          args.export_csv or args.export_json):
         from bruteforce_detector.config import get_config
         from bruteforce_detector.managers.database import BlacklistDatabase
         from bruteforce_detector.utils.query_tool import QueryTool
@@ -700,6 +706,10 @@ def main():
             query.query_country(args.query_country)
         elif args.query_reason:
             query.query_reason(args.query_reason)
+        elif args.query_attack_type:
+            query.query_attack_type(args.query_attack_type)
+        elif args.query_timerange:
+            query.query_timerange(args.query_timerange)
         elif args.list_countries:
             query.list_countries()
         elif args.list_sources:
@@ -708,8 +718,35 @@ def main():
             query.top_threats(args.top_threats)
         elif args.export_csv:
             query.export_csv(args.export_csv)
+        elif args.export_json:
+            query.export_json(args.export_json)
 
         sys.exit(0)
+
+    # Live monitor command
+    elif args.live_monitor:
+        from bruteforce_detector.config import get_config
+        from bruteforce_detector.managers.database import BlacklistDatabase
+        from bruteforce_detector.utils.live_monitor import LiveMonitor
+
+        config = get_config()
+
+        if not config.use_database:
+            print("ERROR: Live monitor requires database mode (use_database = true in config)")
+            sys.exit(1)
+
+        db = BlacklistDatabase(config.database_path)
+        monitor = LiveMonitor(db)
+
+        print("Starting live threat monitor...")
+        print("Press Ctrl+C to stop")
+        print()
+
+        try:
+            monitor.run()
+        except KeyboardInterrupt:
+            print("\nStopping live monitor...")
+            sys.exit(0)
 
     engine = BruteForceDetectorEngine()
     

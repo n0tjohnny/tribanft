@@ -1,0 +1,259 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# CrowdSec Integration Detection Rules
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Integrates with CrowdSec Local API (LAPI) to import community threat intelligence.
+#
+# CrowdSec is a collaborative IDS that shares threat intelligence across users.
+# This detector queries the local CrowdSec instance for:
+# - Active ban decisions
+# - Historical alert data
+#
+# Requires: CrowdSec installed and running locally
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-24
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+detectors:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ CrowdSec Detection                                                   │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: crowdsec_detector
+      version: 1.0.0
+      description: Imports blocked IPs from CrowdSec Local API
+      enabled: true  # Enabled by default if CrowdSec is installed
+      priority: high
+
+    # NOTE: This detector does NOT process log events
+    # It queries CrowdSec LAPI directly via:
+    #   - cscli decisions list (active bans)
+    #   - cscli alerts list (historical alerts)
+    #
+    # Implementation: bruteforce_detector/plugins/detectors/crowdsec.py
+
+    detection:
+      event_types:
+        - CROWDSEC_BLOCK
+
+      # Threshold=1 means "import immediately if found in CrowdSec"
+      threshold: 1
+      time_window_minutes: 1440  # 24 hours (deduplication window)
+      confidence: high
+
+      patterns: []  # No regex patterns (CrowdSec API queries)
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "CrowdSec: {scenario} ({event_count} events)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Configuration Instructions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Step 1: Install CrowdSec
+# ────────────────────────
+# Debian/Ubuntu:
+#   curl -s https://install.crowdsec.net | sudo sh
+#   sudo apt install crowdsec
+#
+# RedHat/CentOS/Fedora:
+#   curl -s https://install.crowdsec.net | sudo sh
+#   sudo yum install crowdsec
+#
+# Step 2: Start CrowdSec
+# ──────────────────────
+# sudo systemctl enable crowdsec
+# sudo systemctl start crowdsec
+#
+# Step 3: Install CrowdSec Collections (Optional but Recommended)
+# ────────────────────────────────────────────────────────────────
+# sudo cscli collections install crowdsecurity/linux
+# sudo cscli collections install crowdsecurity/sshd
+# sudo systemctl restart crowdsec
+#
+# Step 4: Verify CrowdSec is Running
+# ───────────────────────────────────
+# cscli decisions list
+#   (Should return empty list or show active decisions)
+#
+# cscli metrics
+#   (Should show parser/scenario statistics)
+#
+# Step 5: Enable This Detector
+# ─────────────────────────────
+# Already enabled by default (enabled: true)
+#
+# Step 6: Test Integration
+# ─────────────────────────
+# tribanft --detect --verbose
+#   (Check logs for "Found N IPs from CrowdSec")
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# How CrowdSec Integration Works
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Detection Flow:
+# ───────────────
+# 1. TribanFT detector queries CrowdSec via `cscli` command
+# 2. Two sources queried:
+#    a) Active decisions: IPs currently banned by CrowdSec
+#    b) Historical alerts: Past attack patterns (for context)
+# 3. Results merged and deduplicated
+# 4. New IPs (not already in TribanFT blacklist) are imported
+# 5. Metadata preserved: scenario, event count, country, AS/ISP
+#
+# Data Sources:
+# ─────────────
+# - cscli decisions list -o json
+#   Returns: Active ban decisions with duration/reason
+#
+# - cscli alerts list -a -o json
+#   Returns: Historical alerts with scenario/event details
+#
+# Deduplication:
+# ──────────────
+# - Detector checks existing TribanFT blacklist before importing
+# - Only NEW IPs from CrowdSec are added
+# - Prevents duplicate detections and unnecessary database writes
+#
+# Scenario Mapping:
+# ─────────────────
+# CrowdSec scenarios are mapped to human-readable reasons:
+#   crowdsecurity/ssh-bf          → "SSH Brute Force"
+#   crowdsecurity/http-probing    → "HTTP Probing"
+#   crowdsecurity/mssql-bf        → "MSSQL Brute Force"
+#   ...etc (see crowdsec.py SCENARIO_NAMES dict)
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CrowdSec vs TribanFT: Complementary Strengths
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# CrowdSec Strengths:
+# ───────────────────
+# ✓ Community threat intelligence (millions of users sharing data)
+# ✓ Pre-built scenarios for common attacks
+# ✓ Automatic updates via bouncer mechanism
+# ✓ Multi-instance deployment (LAPI + agents)
+# ✓ Web dashboard for visualization
+#
+# TribanFT Strengths:
+# ───────────────────
+# ✓ Custom detection rules (YAML-based)
+# ✓ SQL injection / web attack detection (CrowdSec has limited L7 support)
+# ✓ Plugin extensibility (write your own detectors)
+# ✓ Bidirectional sync (NFTables ↔ CrowdSec ↔ TribanFT)
+# ✓ IPInfo geolocation enrichment
+# ✓ Database mode for large deployments
+#
+# Why Use Both?
+# ─────────────
+# CrowdSec provides broad community intelligence (SSH, brute force, port scans)
+# TribanFT adds application-layer detection (SQL injection, XSS, WordPress attacks)
+#
+# Combined Workflow:
+# ──────────────────
+# 1. CrowdSec detects SSH brute force → bans IP
+# 2. TribanFT imports CrowdSec decision → adds to local blacklist
+# 3. TribanFT detects SQL injection (which CrowdSec might miss) → bans IP
+# 4. Both systems share blocklist via NFTables sync
+# 5. Result: Maximum protection with minimal false positives
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example CrowdSec Detections
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Scenario 1: SSH Brute Force
+# ───────────────────────────
+# CrowdSec detects: 50 failed SSH login attempts from 1.2.3.4
+# Decision created: Ban 1.2.3.4 for 4 hours
+# TribanFT imports:
+#   IP: 1.2.3.4
+#   Reason: "CrowdSec: SSH Brute Force (50 events)"
+#   Country: CN (from CrowdSec metadata)
+#   ISP: "123456 ChinaNet"
+#
+# Scenario 2: HTTP Probing
+# ────────────────────────
+# CrowdSec detects: 100+ requests to /admin, /.env, /config.php
+# Decision created: Ban 5.6.7.8 for 4 hours
+# TribanFT imports:
+#   IP: 5.6.7.8
+#   Reason: "CrowdSec: HTTP Probing (105 events)"
+#   Country: US
+#   ISP: "Digital Ocean"
+#
+# Scenario 3: Community Blocklist
+# ────────────────────────────────
+# CrowdSec receives update from community blocklist
+# Decision created: Ban 9.10.11.12 (known botnet C&C)
+# TribanFT imports:
+#   IP: 9.10.11.12
+#   Reason: "CrowdSec: Community Blocklist Update"
+#   Country: RU
+#   ISP: "Unknown ISP"
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Troubleshooting
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Issue: "cscli command not found"
+# ─────────────────────────────────
+# Solution: Install CrowdSec (see Step 1 above)
+# Verify: which cscli → should return /usr/bin/cscli
+#
+# Issue: "No CrowdSec decisions or alerts found"
+# ──────────────────────────────────────────────
+# Solution: CrowdSec is running but no attacks detected yet
+# Test: Trigger a detection manually:
+#   # Generate fake SSH brute force
+#   for i in {1..10}; do ssh invalid@localhost; done
+#   cscli decisions list
+#   (Should show decision for 127.0.0.1)
+#
+# Issue: "All CrowdSec IPs already in blacklist"
+# ──────────────────────────────────────────────
+# This is normal: TribanFT previously imported these IPs
+# No action needed (deduplication working correctly)
+#
+# Issue: "cscli command timed out"
+# ────────────────────────────────
+# Solution: CrowdSec LAPI is slow or unresponsive
+# Check: systemctl status crowdsec
+# Fix: sudo systemctl restart crowdsec
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Advanced: Bidirectional Sync with CrowdSec
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# TribanFT → CrowdSec (Share TribanFT detections with CrowdSec):
+# ───────────────────────────────────────────────────────────────
+# NOT CURRENTLY IMPLEMENTED
+#
+# Future enhancement could push TribanFT detections to CrowdSec via:
+#   cscli decisions add --ip 1.2.3.4 --reason "TribanFT: SQL Injection"
+#
+# This would allow TribanFT's L7 detections to benefit CrowdSec community.
+#
+# CrowdSec → TribanFT (Current Implementation):
+# ──────────────────────────────────────────────
+# ✓ Implemented via this detector
+# ✓ Queries cscli decisions list + cscli alerts list
+# ✓ Imports all CrowdSec decisions to TribanFT blacklist
+#
+# ═══════════════════════════════════════════════════════════════════════════

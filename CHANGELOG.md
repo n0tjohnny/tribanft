@@ -7,6 +7,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.5.0] - 2025-12-24
+
+### Threat Intelligence & Missing Pieces Release
+
+Major feature release implementing missing EventTypes and threat intelligence integration.
+
+### Added
+
+#### New EventTypes
+
+- **DNS_ATTACK** - DNS attack detection (amplification, tunneling, zone transfers, brute force)
+  - Added to models.py (line 98)
+  - Fully implemented with DNS parser
+  - Supports BIND9, dnsmasq, Unbound, systemd-resolved
+
+#### DNS Parser (NEW)
+
+- **DNS Parser** - DNS server attack detection
+  - DNS_ATTACK: Generated for amplification, zone transfers, tunneling, subdomain brute force
+  - Multi-server support: BIND9, dnsmasq, Unbound, systemd-resolved
+  - 16 regex patterns covering major DNS attack vectors:
+    - DNS amplification (ANY queries) - 3 patterns
+    - Zone transfer attempts (AXFR/IXFR) - 4 patterns
+    - DNS tunneling (long subdomains, Base64/hex) - 4 patterns
+    - Subdomain brute force (NXDOMAIN) - 3 patterns
+    - Suspicious queries (TXT, NULL) - 2 patterns
+  - Multi-format timestamp parsing (BIND9, Unbound, syslog)
+  - Pattern file: bruteforce_detector/rules/parsers/dns.yaml (283 lines)
+  - Parser plugin: bruteforce_detector/plugins/parsers/dns.py (178 lines)
+  - Config key: dns_log_path in config.conf.template
+  - Updated documentation: PARSER_EVENTTYPES_MAPPING.md, API_REFERENCE.md
+
+#### Threat Intelligence Integration (NEW)
+
+- **Threat Feed Detector** - External threat intelligence integration
+  - KNOWN_MALICIOUS_IP: Imports known malicious IPs from threat feeds
+  - Supported feeds: AbuseIPDB, Spamhaus DROP/EDROP, AlienVault OTX
+  - 24-hour cache with automatic TTL management
+  - Automatic deduplication against existing blacklist
+  - Rate limiting and API key management
+  - Placeholder implementations for future API integrations
+  - Detector plugin: bruteforce_detector/plugins/detectors/threat_feed.py (395 lines)
+  - Rule file: bruteforce_detector/rules/detectors/threat_intelligence.yaml (162 lines)
+  - Disabled by default (requires API keys and configuration)
+
+- **CrowdSec Integration** - Community threat intelligence
+  - CROWDSEC_BLOCK: Imports blocked IPs from CrowdSec Local API
+  - Verified existing implementation (crowdsec.py already correct)
+  - Added comprehensive YAML rule configuration
+  - Rule file: bruteforce_detector/rules/detectors/crowdsec.yaml (260 lines)
+  - Enabled by default if CrowdSec is installed
+  - Includes installation and configuration instructions
+
+#### Configuration
+
+- **config.conf.template** - Threat intelligence configuration
+  - Added [threat_intelligence] section:
+    - threat_feeds_enabled: Enable/disable threat feed integration
+    - threat_feed_sources: Comma-separated list of feed sources
+    - threat_feed_cache_hours: Cache duration for feed results
+  - Added dns_log_path to [logs] section
+  - API key file configuration for AbuseIPDB and AlienVault OTX
+
+#### Performance Optimizations (NEW)
+
+- **Database Query Optimization** - Significantly improved query performance
+  - Added database indexes:
+    - idx_event_count (DESC) - Optimizes top threats queries
+    - idx_date_added (DESC) - Optimizes time-range queries
+    - idx_last_seen (DESC) - Optimizes recent activity queries
+  - Query performance logging in debug mode:
+    - Context manager for automatic timing
+    - All major queries instrumented
+    - Format: `[PERF] operation_name: XX.XXms`
+  - New query methods with index-optimized SQL:
+    - query_by_attack_type() - Filter by EventType
+    - query_by_timerange() - Filter by date range
+    - query_top_ips() - Get top IPs by event count
+  - File: bruteforce_detector/managers/database.py (+200 lines)
+
+#### Enhanced CLI Query Interface (NEW)
+
+- **--query-attack-type TYPE** - Filter IPs by attack/event type
+  - Example: `tribanft --query-attack-type sql_injection`
+  - Searches event_types in metadata JSON
+  - Case-insensitive matching
+  - Displays up to 100 results sorted by event count
+
+- **--query-timerange RANGE** - Filter IPs by time range
+  - Flexible time range formats:
+    - Date range: `"2025-12-01 to 2025-12-24"`
+    - Relative: `"last 7 days"` or `"last 30 days"`
+  - Uses idx_date_added index for fast queries
+  - Results sorted by date_added descending
+
+- **--export-json FILE** - Export blacklist to JSON format
+  - Full metadata export with proper JSON structure
+  - Includes all fields: geolocation, event_types, timestamps
+  - Sorted by event_count descending
+  - UTF-8 encoding with 2-space indentation
+
+- **--live-monitor** - Real-time threat stream monitoring
+  - Continuously monitors database for new threats
+  - Displays threats as they're detected (2-second polling)
+  - Shows: timestamp, IP, location, attack type, events, reason
+  - Periodic statistics (threats/minute, uptime)
+  - Press Ctrl+C to exit with final stats
+  - File: bruteforce_detector/utils/live_monitor.py (145 lines)
+
+- **Enhanced query_tool.py** - New query methods
+  - query_attack_type() - Attack type filtering
+  - query_timerange() - Time range filtering with parsing
+  - export_json() - JSON export with full metadata
+  - File: bruteforce_detector/utils/query_tool.py (+200 lines)
+
+### Changed
+
+- **models.py** - Added DNS_ATTACK EventType to Protocol-Specific section
+- **PARSER_EVENTTYPES_MAPPING.md** - Added DNS parser to capabilities matrix
+- **API_REFERENCE.md** - Updated EventType documentation with v2.5.0 features
+- **database.py** - Added 3 new indexes and query performance logging
+- **main.py** - Added 4 new CLI arguments and command handlers
+- **query_tool.py** - Added 3 new query methods for enhanced filtering
+
+---
+
 ## [2.4.1] - 2025-12-23
 
 ### Documentation & Automation Release

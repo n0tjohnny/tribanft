@@ -31,8 +31,9 @@ This document maps which parsers generate which `EventType` values. Understandin
 | **Apache/Nginx** | HTTP_REQUEST, HTTP_ERROR_4XX, HTTP_ERROR_5XX, FAILED_LOGIN, SQL_INJECTION, WORDPRESS_ATTACK, XSS_ATTACK, PATH_TRAVERSAL, COMMAND_INJECTION, FILE_UPLOAD_MALICIOUS | L7 (HTTP) | Active |
 | **MSSQL** | PRELOGIN_INVALID, FAILED_LOGIN | L7 (Database) | Active |
 | **Syslog** | FAILED_LOGIN, SSH_ATTACK, RDP_ATTACK | L7 (System) | Active |
-| **FTP** | FTP_ATTACK | L7 (Protocol) | Active (NEW) |
-| **SMTP** | SMTP_ATTACK | L7 (Protocol) | Active (NEW) |
+| **FTP** | FTP_ATTACK | L7 (Protocol) | Active |
+| **SMTP** | SMTP_ATTACK | L7 (Protocol) | Active |
+| **DNS** | DNS_ATTACK | L7 (Protocol) | Active (NEW) |
 | **NFTables** | PORT_SCAN, NETWORK_SCAN | L3/L4 (Firewall) | Active |
 | **IPTables** | PORT_SCAN, NETWORK_SCAN | L3/L4 (Firewall) | Active |
 
@@ -221,6 +222,43 @@ Exim:
 
 ---
 
+## DNS Parser (dns.py) [NEW]
+
+**Parses:** DNS server logs (BIND9, dnsmasq, Unbound, systemd-resolved)
+
+### EventTypes Generated
+
+| EventType | Trigger Condition | Pattern Source |
+|-----------|------------------|----------------|
+| `DNS_ATTACK` | DNS amplification, zone transfers, tunneling, subdomain brute force | `dns.yaml: dns_attacks` |
+
+### Attack Types Detected
+
+| Attack Type | Pattern Description | Example Pattern |
+|-------------|-------------------|-----------------|
+| **DNS Amplification** | ANY queries (large responses for small requests) | `query.*\s+ANY\s` |
+| **Zone Transfer** | AXFR/IXFR queries from unauthorized IPs | `query.*\s+AXFR\s` |
+| **DNS Tunneling** | Long subdomains, Base64/hex encoding | `[a-z0-9]{50,}\.` |
+| **Subdomain Brute Force** | Rapid NXDOMAIN responses | `NXDOMAIN.*from` |
+| **Suspicious Queries** | TXT/NULL record queries | `query.*\s+TXT\s` |
+
+### Example Log Lines
+
+```
+BIND9:
+  22-Dec-2025 10:30:15.123 queries: info: client 1.2.3.4#12345: query: example.com IN ANY +E(0)
+  22-Dec-2025 10:30:16.456 queries: info: client 1.2.3.4#12345: query: example.com IN AXFR +E(0)
+
+dnsmasq:
+  Dec 22 10:30:15 dnsmasq[1234]: query[ANY] example.com from 1.2.3.4
+  Dec 22 10:30:17 dnsmasq[1234]: config nonexistent.example.com is NXDOMAIN from 1.2.3.4
+
+Unbound:
+  [2025-12-22 10:30:15] unbound[1234]: 1.2.3.4 example.com. IN ANY
+```
+
+---
+
 ## EventTypes NOT Currently Generated
 
 These EventTypes exist in `models.py` but **no parser currently generates them**:
@@ -229,8 +267,6 @@ These EventTypes exist in `models.py` but **no parser currently generates them**
 |-----------|----------------|--------|
 | `DRUPAL_ATTACK` | Apache/Nginx parser (needs patterns) | **Needs Patterns** |
 | `JOOMLA_ATTACK` | Apache/Nginx parser (needs patterns) | **Needs Patterns** |
-| `CROWDSEC_BLOCK` | CrowdSec integration | **Needs Integration** |
-| `KNOWN_MALICIOUS_IP` | Threat feed integration | **Needs Integration** |
 
 ---
 
