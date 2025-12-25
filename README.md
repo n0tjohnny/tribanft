@@ -55,7 +55,13 @@ Most tools stop at detection. **TribanFT explains the “why” behind the attac
 - **WordPress Attacks** - 4 specialized detectors (login bruteforce, XML-RPC, plugin scanning)
 - **FTP Attacks** - Bruteforce detection (vsftpd, ProFTPD, Pure-FTPd)
 - **SMTP Attacks** - Authentication failures and relay attempts (Postfix, Sendmail, Exim)
+- **DNS Attacks** - 16 patterns (amplification, zone transfers, tunneling, subdomain brute force) [NEW]
 - **Failed Login Attempts** - Multi-source aggregation (MSSQL, Apache, Nginx, SSH, RDP, FTP)
+
+### Threat Intelligence (NEW v2.5)
+- **External Threat Feeds** - AbuseIPDB, Spamhaus DROP/EDROP, AlienVault OTX integration
+- **CrowdSec Integration** - Community blocklist import and export
+- **Known Malicious IPs** - Automatic enrichment from threat intelligence sources
 
 ---
 
@@ -63,9 +69,9 @@ Most tools stop at detection. **TribanFT explains the “why” behind the attac
 
 ```bash
 # Download latest release
-wget https://github.com/n0tjohnny/tribanft/archive/v2.4.1.tar.gz
-tar -xzf v2.4.1.tar.gz
-cd tribanft-2.4.1
+wget https://github.com/n0tjohnny/tribanft/archive/v2.5.0.tar.gz
+tar -xzf v2.5.0.tar.gz
+cd tribanft-2.5.0
 
 # Automated installation (one command)
 ./install.sh
@@ -107,12 +113,19 @@ detection:
 Every blacklisted IP includes:
 - **Geolocation**: Country, city, ISP
 - **Attack Timeline**: First seen, last seen, event count
-- **Attack Patterns**: Which detectors triggered, confidence level
-- **Queryable Data**: Search by country, attack type, event count
+- **Attack Patterns**: Which detectors triggered, confidence level, event types
+- **External Feeds**: Integration with AbuseIPDB, Spamhaus, AlienVault OTX (NEW)
+- **Queryable Data**: Search by country, attack type, time range, event count
 
 ```bash
 # Find all attackers from China
 tribanft --query-country CN
+
+# Filter by attack type (NEW)
+tribanft --query-attack-type sql_injection
+
+# Time-based queries (NEW)
+tribanft --query-timerange "last 7 days"
 
 # Show top 20 most aggressive IPs
 tribanft --top-threats 20
@@ -164,8 +177,14 @@ tribanft --blacklist-add 5.6.7.8           # Manually block IP (auto-investigate
 # Query & Analysis
 tribanft --query-ip 1.2.3.4                # Detailed IP information
 tribanft --query-country CN                # All IPs from China
+tribanft --query-attack-type sql_injection # Filter by attack type [NEW]
+tribanft --query-timerange "last 7 days"   # Filter by time range [NEW]
 tribanft --top-threats 20                  # Top 20 by event count
-tribanft --export-csv output.csv           # Export for analysis
+tribanft --export-csv output.csv           # Export to CSV
+tribanft --export-json output.json         # Export to JSON [NEW]
+
+# Real-Time Monitoring [NEW]
+tribanft --live-monitor                    # Live threat stream monitoring
 
 # Service Management
 sudo systemctl status tribanft             # Check service status
@@ -201,11 +220,45 @@ NFTables/CrowdSec/Fail2Ban Sync
 | Apache/Nginx | L7 | 10 types (HTTP errors, SQL injection, XSS, path traversal, etc.) | access.log |
 | FTP | L7 | 1 type (FTP attacks) | vsftpd.log, proftpd.log |
 | SMTP | L7 | 1 type (SMTP attacks) | mail.log, maillog |
+| DNS | L7 | 1 type (DNS attacks: amplification, tunneling, zone transfers) [NEW] | query.log, dnsmasq.log |
 | NFTables/IPTables | L3/L4 | 2 types (port scan, network scan) | kern.log |
 | MSSQL | L7 | 2 types (prelogin, failed login) | MSSQL logs |
 | Syslog | L7 | 3 types (failed login, SSH/RDP attacks) | auth.log |
 
 See [docs/PARSER_EVENTTYPES_MAPPING.md](docs/PARSER_EVENTTYPES_MAPPING.md) for complete parser capabilities.
+
+---
+
+## Performance & Query Features (v2.5)
+
+### Database Optimization
+- **Indexed Queries** - 50-100x speedup for common queries (event_count, date_added, last_seen)
+- **Query Performance Logging** - Debug mode tracks query execution time ([PERF] logs)
+- **Efficient Filtering** - Filter by attack type, time range, or top threats with optimized SQL
+
+### Advanced Query Interface
+```bash
+# Filter by attack type
+tribanft --query-attack-type sql_injection
+tribanft --query-attack-type dns_attack
+
+# Time-based queries
+tribanft --query-timerange "last 7 days"
+tribanft --query-timerange "2025-12-01 to 2025-12-24"
+
+# Export formats
+tribanft --export-json blacklist.json      # Full metadata export
+tribanft --export-csv blacklist.csv        # Spreadsheet-compatible
+
+# Real-time monitoring
+tribanft --live-monitor                    # Live threat stream with stats
+```
+
+**Live Monitor Features:**
+- Real-time threat detection (2-second updates)
+- Displays: IP, location, attack type, event count, reason
+- Periodic statistics (threats/minute, uptime)
+- Graceful shutdown with final summary
 
 ---
 
@@ -230,6 +283,14 @@ enable_yaml_rules = true         # YAML-based detection rules
 [features]
 enable_nftables_update = true    # Sync to NFTables firewall
 enable_crowdsec_integration = true
+
+[threat_intelligence]            # NEW in v2.5
+threat_feeds_enabled = false     # Enable threat feed integration
+threat_feed_sources = spamhaus   # Comma-separated: spamhaus,abuseipdb,alienvault
+threat_feed_cache_hours = 24     # Cache duration for feeds
+
+[logs]
+dns_log_path = /var/log/named/query.log  # DNS server logs (NEW)
 ```
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all options.
