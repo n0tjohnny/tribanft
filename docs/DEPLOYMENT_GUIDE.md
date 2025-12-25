@@ -1,6 +1,6 @@
 # TribanFT Deployment Guide
 
-Automated deployment for TribanFT v2.4.1
+Automated deployment for TribanFT v2.5.8
 
 ---
 
@@ -9,9 +9,9 @@ Automated deployment for TribanFT v2.4.1
 ```bash
 # On server
 cd ~
-wget https://github.com/n0tjohnny/tribanft/archive/v2.4.1.tar.gz
-tar -xzf v2.4.1.tar.gz
-cd tribanft-2.4.1
+wget https://github.com/n0tjohnny/tribanft/archive/v2.5.8.tar.gz
+tar -xzf v2.5.8.tar.gz
+cd tribanft-2.5.8
 ./install.sh
 ```
 
@@ -32,6 +32,8 @@ Default config runs in **learning mode** (no blocking) for Week 1.
 
 ## Week 2: Tune & Enable Blocking
 
+**Config location:** `~/.local/share/tribanft/config.conf`
+
 ```bash
 # Review detections from Week 1
 ~/.local/share/tribanft/scripts/analyze_and_tune.sh 7
@@ -42,7 +44,7 @@ tribanft --whitelist-add 10.0.0.5 --reason "Monitoring server"
 # Setup NFTables
 sudo ~/.local/share/tribanft/scripts/setup_nftables.sh
 
-# Enable blocking
+# Enable blocking (edit config file)
 sed -i 's/enable_nftables_update = false/enable_nftables_update = true/' \
     ~/.local/share/tribanft/config.conf
 

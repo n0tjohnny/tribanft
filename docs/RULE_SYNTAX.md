@@ -654,7 +654,7 @@ metadata:
 
 detection:
   event_types:
-    - FAILED_LOGIN
+    - SQL_INJECTION
   threshold: 5
   time_window_minutes: 60
   confidence: high

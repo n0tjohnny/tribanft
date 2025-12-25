@@ -10,7 +10,7 @@ Quick reference for creating custom detectors and parsers.
 
 ```bash
 # Copy template
-cp bruteforce_detector/plugins/detectors/DETECTOR_PLUGIN_TEMPLATE.py \
+cp bruteforce_detector/plugins/detectors/DETECTOR_PLUGIN_TEMPLATE.py.example \
    bruteforce_detector/plugins/detectors/my_detector.py
 
 # Edit plugin
@@ -24,7 +24,7 @@ sudo systemctl restart tribanft
 
 ```bash
 # Copy template
-cp bruteforce_detector/plugins/parsers/PARSER_PLUGIN_TEMPLATE.py \
+cp bruteforce_detector/plugins/parsers/PARSER_PLUGIN_TEMPLATE.py.example \
    bruteforce_detector/plugins/parsers/my_parser.py
 
 # Edit plugin
@@ -89,9 +89,9 @@ METADATA = {
 
 ```python
 class MyDetector(BaseDetector):
-    def __init__(self, config, blacklist_manager):
+    def __init__(self, config, event_type: EventType):
         """Constructor - dependencies injected by PluginManager"""
-        super().__init__(config, blacklist_manager)
+        super().__init__(config, event_type)
 
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """Main detection logic - process events, return detections"""
@@ -102,7 +102,7 @@ class MyDetector(BaseDetector):
 
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
-| `__init__` | config, blacklist_manager | None | Constructor with dependency injection |
+| `__init__` | config, event_type: EventType | None | Constructor with config and EventType |
 | `detect` | List[SecurityEvent] | List[DetectionResult] | Main detection logic |
 
 ### Optional Methods
@@ -147,9 +147,9 @@ METADATA = {
 
 ```python
 class MyParser(BaseLogParser):
-    def __init__(self, config):
-        """Constructor - config injected by PluginManager"""
-        super().__init__(config, "my_parser")
+    def __init__(self, log_path: str):
+        """Constructor - log path injected by PluginManager"""
+        super().__init__(log_path)
 
     def _parse_line(self, line: str, line_number: int) -> Optional[List[SecurityEvent]]:
         """Parse single log line - return SecurityEvent(s) or None"""
@@ -158,20 +158,19 @@ class MyParser(BaseLogParser):
 
         # Extract data
         event = SecurityEvent(
-            timestamp=...,
-            source_ip=...,
+            source_ip=ipaddress.ip_address(ip_str),  # IPAddress object
             event_type=EventType.FAILED_LOGIN,
-            severity=Severity.WARNING,
-            message=...,
-            raw_log=line,
-            source="my_parser"
+            timestamp=datetime.now(),
+            source="my_parser",
+            raw_message=line,
+            metadata={}
         )
         return [event]
 ```
 
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
-| `__init__` | config | None | Constructor with config injection |
+| `__init__` | log_path: str | None | Constructor with log file path |
 | `_parse_line` | line: str, line_number: int | Optional[List[SecurityEvent]] | Parse single line |
 
 ### Optional Methods
@@ -188,14 +187,12 @@ def _initialize_patterns(self):
 
 ```python
 SecurityEvent(
-    timestamp=datetime,      # When event occurred
-    source_ip="1.2.3.4",    # Source IP address
-    event_type=EventType,    # Event type (FAILED_LOGIN, SQL_INJECTION, etc.)
-    severity=Severity,       # WARNING, CRITICAL, INFO
-    message="...",           # Human-readable message
-    raw_log="...",           # Original log line
-    source="parser_name",    # Parser that generated this
-    metadata={}              # Optional dict for extra data
+    source_ip=ipaddress.ip_address("1.2.3.4"),  # IPAddress object (NOT string)
+    event_type=EventType.FAILED_LOGIN,          # EventType enum
+    timestamp=datetime.now(),                   # datetime object
+    source="parser_name",                       # Parser that generated this
+    raw_message="original log line...",         # Original log line (NOT raw_log)
+    metadata={}                                 # Optional dict for extra data
 )
 ```
 
@@ -214,13 +211,15 @@ See: `bruteforce_detector/models.py` for full list
 
 ```python
 DetectionResult(
-    ip_address="1.2.3.4",
-    reason="Failed login: 10 attempts in 5 minutes",
-    event_count=10,
-    time_window=300,  # seconds
-    severity=Severity.CRITICAL,
-    event_type=EventType.FAILED_LOGIN,
-    detector_name="my_detector"
+    ip=ipaddress.ip_address("1.2.3.4"),     # IPAddress object (NOT ip_address)
+    reason="Failed login: 10 attempts",     # Human-readable reason
+    confidence=DetectionConfidence.HIGH,    # Detection confidence (NOT severity)
+    event_count=10,                         # Number of events
+    event_type=EventType.FAILED_LOGIN,      # EventType enum
+    source_events=[...],                    # List[SecurityEvent] - source events
+    first_seen=datetime.now(),              # First event timestamp
+    last_seen=datetime.now(),               # Last event timestamp
+    geolocation=None                        # Optional geolocation data
 )
 ```
 
@@ -230,10 +229,11 @@ DetectionResult(
 
 ```python
 from bruteforce_detector.detectors.base import BaseDetector
-from bruteforce_detector.models import SecurityEvent, DetectionResult, EventType, Severity
+from bruteforce_detector.models import SecurityEvent, DetectionResult, EventType, DetectionConfidence
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import List
+import ipaddress
 
 METADATA = {
     "name": "SSH Timing Attack Detector",
@@ -245,8 +245,8 @@ METADATA = {
 }
 
 class SSHTimingDetector(BaseDetector):
-    def __init__(self, config, blacklist_manager):
-        super().__init__(config, blacklist_manager)
+    def __init__(self, config, event_type: EventType):
+        super().__init__(config, event_type)
         self.threshold = 5   # attempts
         self.window = 60     # seconds
 
@@ -261,15 +261,16 @@ class SSHTimingDetector(BaseDetector):
         detections = []
         for ip, ip_event_list in ip_events.items():
             if len(ip_event_list) >= self.threshold:
-                detections.append(DetectionResult(
-                    ip_address=ip,
+                # Use helper method from BaseDetector
+                detection = self._create_detection_result(
+                    ip_str=str(ip),
                     reason=f"SSH timing attack: {len(ip_event_list)} attempts in {self.window}s",
+                    confidence="high",  # String converted to DetectionConfidence internally
                     event_count=len(ip_event_list),
-                    time_window=self.window,
-                    severity=Severity.CRITICAL,
-                    event_type=EventType.FAILED_LOGIN,
-                    detector_name=METADATA["name"]
-                ))
+                    source_events=ip_event_list
+                )
+                if detection:
+                    detections.append(detection)
 
         return detections
 ```
@@ -280,9 +281,10 @@ class SSHTimingDetector(BaseDetector):
 
 ```python
 from bruteforce_detector.parsers.base import BaseLogParser
-from bruteforce_detector.models import SecurityEvent, EventType, Severity
+from bruteforce_detector.models import SecurityEvent, EventType
 from datetime import datetime
 from typing import Optional, List
+import ipaddress
 import re
 
 METADATA = {
@@ -295,8 +297,8 @@ METADATA = {
 }
 
 class CustomAppParser(BaseLogParser):
-    def __init__(self, config):
-        super().__init__(config, "custom_app")
+    def __init__(self, log_path: str):
+        super().__init__(log_path)
         self.login_pattern = re.compile(r'LOGIN_FAILED ip=(\S+)')
 
     def _parse_line(self, line: str, line_number: int) -> Optional[List[SecurityEvent]]:
@@ -304,16 +306,14 @@ class CustomAppParser(BaseLogParser):
         if not match:
             return None
 
-        ip = match.group(1)
+        ip_str = match.group(1)
         event = SecurityEvent(
-            timestamp=datetime.now(),
-            source_ip=ip,
+            source_ip=ipaddress.ip_address(ip_str),  # IPAddress object
             event_type=EventType.FAILED_LOGIN,
-            severity=Severity.WARNING,
-            message=f"Failed login from {ip}",
-            raw_log=line,
+            timestamp=datetime.now(),
             source="custom_app",
-            metadata={}
+            raw_message=line,
+            metadata={"ip": ip_str}
         )
         return [event]
 ```

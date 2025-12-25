@@ -1,2 +1,2 @@
 """TribanFT - IP Visibility & Intelligent Blacklist Management"""
-__version__ = "1.0.0"
+__version__ = "2.5.8"

@@ -25,6 +25,7 @@ from typing import Set, List, Dict, Tuple
 import ipaddress
 from pathlib import Path
 import logging
+import threading
 from datetime import datetime, timezone
 
 from ..models import DetectionResult
@@ -46,11 +47,11 @@ class BlacklistManager:
     and threat intelligence to maintain a comprehensive IP blacklist.
     """
     
-    def __init__(self, whitelist_manager: WhitelistManager, 
+    def __init__(self, whitelist_manager: WhitelistManager,
                  geolocation_manager: IPGeolocationManager = None):
         """
         Initialize blacklist manager with required dependencies.
-        
+
         Args:
             whitelist_manager: WhitelistManager for filtering trusted IPs
             geolocation_manager: Optional IPGeolocationManager for threat intelligence
@@ -60,7 +61,10 @@ class BlacklistManager:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self.manual_blacklist_file = self.config.manual_blacklist_file
-        
+
+        # RACE CONDITION FIX (C8): Lock for atomic read-modify-write operations
+        self._update_lock = threading.Lock()
+
         # Initialize specialized modules
         self.log_searcher = LogSearcher(self.config)
         self.writer = BlacklistAdapter(self.config, use_database=self.config.use_database)
@@ -285,44 +289,49 @@ class BlacklistManager:
     def _bulk_update_file(self, filename: str, updates: Dict[str, Dict]):
         """
         Internal helper to merge metadata updates with existing blacklist file.
-        
+
+        RACE CONDITION FIX (C8): Protected with lock for atomic read-modify-write.
+
         Reads existing data, merges with updates, writes back.
         """
-        existing = self.writer.read_blacklist(filename)
-        
-        for ip_str, new_metadata in updates.items():
-            if ip_str in existing:
-                # Merge with existing entry - preserve original data
-                existing_entry = existing[ip_str]
-                
-                # Update geolocation only if missing
-                if not existing_entry.get('geolocation') and new_metadata.get('geolocation'):
-                    existing_entry['geolocation'] = new_metadata['geolocation']
-                
-                # Use earliest first_seen
-                existing_first = self._normalize_datetime(existing_entry.get('first_seen'))
-                new_first = self._normalize_datetime(new_metadata.get('first_seen'))
-                if new_first and (not existing_first or new_first < existing_first):
-                    existing_entry['first_seen'] = new_first
-                
-                # Use most recent last_seen
-                existing_last = self._normalize_datetime(existing_entry.get('last_seen'))
-                new_last = self._normalize_datetime(new_metadata.get('last_seen'))
-                if new_last and (not existing_last or new_last > existing_last):
-                    existing_entry['last_seen'] = new_last
-                
-                # For enrichment updates (from NFTables/CrowdSec), use max event count
-                # rather than incrementing to avoid inflation from repeated enrichment
-                new_count = new_metadata.get('event_count', 0)
-                existing_count = existing_entry.get('event_count', 0)
-                if new_count > existing_count:
-                    existing_entry['event_count'] = new_count
-            else:
-                # New IP - add it
-                existing[ip_str] = new_metadata
-        
-        # Write back (use 0 for new_count since this is an update, not detection)
-        self.writer.write_blacklist(filename, existing, 0)
+        # RACE CONDITION FIX: Acquire lock for atomic read-modify-write
+        with self._update_lock:
+            existing = self.writer.read_blacklist(filename)
+
+            for ip_str, new_metadata in updates.items():
+                if ip_str in existing:
+                    # Merge with existing entry - preserve original data
+                    existing_entry = existing[ip_str]
+
+                    # Update geolocation only if missing
+                    if not existing_entry.get('geolocation') and new_metadata.get('geolocation'):
+                        existing_entry['geolocation'] = new_metadata['geolocation']
+
+                    # Use earliest first_seen
+                    existing_first = self._normalize_datetime(existing_entry.get('first_seen'))
+                    new_first = self._normalize_datetime(new_metadata.get('first_seen'))
+                    if new_first and (not existing_first or new_first < existing_first):
+                        existing_entry['first_seen'] = new_first
+
+                    # Use most recent last_seen
+                    existing_last = self._normalize_datetime(existing_entry.get('last_seen'))
+                    new_last = self._normalize_datetime(new_metadata.get('last_seen'))
+                    if new_last and (not existing_last or new_last > existing_last):
+                        existing_entry['last_seen'] = new_last
+
+                    # For enrichment updates (from NFTables/CrowdSec), use max event count
+                    # rather than incrementing to avoid inflation from repeated enrichment
+                    new_count = new_metadata.get('event_count', 0)
+                    existing_count = existing_entry.get('event_count', 0)
+                    if new_count > existing_count:
+                        existing_entry['event_count'] = new_count
+                else:
+                    # New IP - add it
+                    existing[ip_str] = new_metadata
+
+            # Write back (use 0 for new_count since this is an update, not detection)
+            self.writer.write_blacklist(filename, existing, 0)
+            # Lock automatically released here
     
     def get_all_blacklisted_ips(self) -> Dict[str, Set[ipaddress.IPv4Address | ipaddress.IPv6Address]]:
         """
@@ -400,31 +409,35 @@ class BlacklistManager:
     def sync_database_to_files(self):
         """
         Force synchronization from database to blacklist files.
-        
+
+        RACE CONDITION FIX (C8): Protected with lock to prevent concurrent modifications.
+
         Useful for manual sync or recovery scenarios.
         Returns True if sync successful.
         """
         if not self.config.use_database:
             self.logger.warning("WARNING: Not using database, nothing to sync")
             return True
-        
+
         self.logger.info("Forcing database to file sync...")
-        
+
         try:
-            # Get all IPv4 entries
-            ipv4_data = self.writer.read_blacklist(self.config.blacklist_ipv4_file)
-            
-            # Write to file using the adapter's sync logic
-            self.writer.write_blacklist(self.config.blacklist_ipv4_file, ipv4_data, 0)
-            
-            # Optional: Also sync IPv6
-            ipv6_data = self.writer.read_blacklist(self.config.blacklist_ipv6_file)
-            if ipv6_data:
-                self.writer.write_blacklist(self.config.blacklist_ipv6_file, ipv6_data, 0)
-            
-            self.logger.info(f"SUCCESS: Database sync complete: {len(ipv4_data)} IPv4, {len(ipv6_data)} IPv6")
-            return True
-            
+            # RACE CONDITION FIX: Acquire lock to prevent concurrent modifications during sync
+            with self._update_lock:
+                # Get all IPv4 entries from database
+                ipv4_data = self.writer.read_blacklist(self.config.blacklist_ipv4_file)
+
+                # Write to file using the adapter's sync logic
+                self.writer.write_blacklist(self.config.blacklist_ipv4_file, ipv4_data, 0)
+
+                # Also sync IPv6
+                ipv6_data = self.writer.read_blacklist(self.config.blacklist_ipv6_file)
+                if ipv6_data:
+                    self.writer.write_blacklist(self.config.blacklist_ipv6_file, ipv6_data, 0)
+
+                self.logger.info(f"SUCCESS: Database sync complete: {len(ipv4_data)} IPv4, {len(ipv6_data)} IPv6")
+                return True
+
         except Exception as e:
             self.logger.error(f"ERROR: Database sync failed: {e}")
             return False
@@ -462,7 +475,20 @@ class BlacklistManager:
     
     def _update_blacklist_file(self, filename: str, new_ips_info: Dict, replace: bool = False):
         """
-        Merge new IPs with existing blacklist and write to storage.
+        Merge new IPs with existing blacklist and write to storage atomically.
+
+        RACE CONDITION FIX (C8): Holds lock across entire read-modify-write cycle.
+        Prevents concurrent updates from overwriting each other's changes.
+
+        Without lock:
+        - Thread A reads, Thread B reads (same data)
+        - Thread A modifies, Thread B modifies (different changes)
+        - Thread A writes, Thread B writes (B overwrites A - DATA LOSS!)
+
+        With lock:
+        - Thread A acquires lock, reads, modifies, writes, releases
+        - Thread B waits, then reads updated data, modifies, writes
+        - All changes preserved, no data loss
 
         Handles merging of automatic detections, manual additions, and
         existing entries while preserving metadata and timestamps.
@@ -476,56 +502,59 @@ class BlacklistManager:
         FIXED: Preserves existing metadata when re-detecting IPs.
         Only updates timestamps and increments event counts.
         """
-        existing = self.writer.read_blacklist(filename)
-        manual = self._get_manual_ips_info()
+        # RACE CONDITION FIX: Acquire lock for entire read-modify-write operation
+        with self._update_lock:
+            existing = self.writer.read_blacklist(filename)
+            manual = self._get_manual_ips_info()
 
-        # INTELLIGENT MERGE: Preserve existing metadata (unless replace=True)
-        merged = existing.copy()
+            # INTELLIGENT MERGE: Preserve existing metadata (unless replace=True)
+            merged = existing.copy()
 
-        for ip_str, new_info in new_ips_info.items():
-            if ip_str in existing:
-                if replace:
-                    # REPLACE mode: Overwrite existing entry with new trusted data
-                    merged[ip_str] = new_info
+            for ip_str, new_info in new_ips_info.items():
+                if ip_str in existing:
+                    if replace:
+                        # REPLACE mode: Overwrite existing entry with new trusted data
+                        merged[ip_str] = new_info
+                    else:
+                        # MERGE mode: IP already exists - UPDATE only timestamps and events
+                        existing_entry = merged[ip_str]
+
+                        # Preserve original metadata (reason, confidence, source, first_seen, date_added)
+                        # Update last_seen to most recent timestamp (use max to ensure forward progression)
+                        # Normalize datetimes to handle timezone-aware/naive comparison
+                        new_last_seen = self._normalize_datetime(new_info.get('last_seen'))
+                        existing_last_seen = self._normalize_datetime(existing_entry.get('last_seen'))
+                        if new_last_seen and existing_last_seen:
+                            existing_entry['last_seen'] = max(new_last_seen, existing_last_seen)
+                        elif new_last_seen:
+                            existing_entry['last_seen'] = new_last_seen
+
+                        # Increment event count (accumulate total events seen)
+                        # Note: This counts total detection events, not unique incidents
+                        existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_info.get('event_count', 0)
+
+                        # Merge event_types (union of both sets)
+                        existing_types = set(existing_entry.get('event_types', []))
+                        new_types = set(new_info.get('event_types', []))
+                        existing_entry['event_types'] = list(existing_types | new_types)
+
+                        # Keep original first_seen, date_added, reason, confidence, source
+                        # (Don't overwrite with new_info values)
+
                 else:
-                    # MERGE mode: IP already exists - UPDATE only timestamps and events
-                    existing_entry = merged[ip_str]
+                    # New IP - add completely
+                    merged[ip_str] = new_info
 
-                    # Preserve original metadata (reason, confidence, source, first_seen, date_added)
-                    # Update last_seen to most recent timestamp (use max to ensure forward progression)
-                    # Normalize datetimes to handle timezone-aware/naive comparison
-                    new_last_seen = self._normalize_datetime(new_info.get('last_seen'))
-                    existing_last_seen = self._normalize_datetime(existing_entry.get('last_seen'))
-                    if new_last_seen and existing_last_seen:
-                        existing_entry['last_seen'] = max(new_last_seen, existing_last_seen)
-                    elif new_last_seen:
-                        existing_entry['last_seen'] = new_last_seen
+            # Add manual IPs (they take precedence over automatic)
+            # Manual entries completely override any existing automatic detections
+            for ip_str, manual_info in manual.items():
+                merged[ip_str] = manual_info
 
-                    # Increment event count (accumulate total events seen)
-                    # Note: This counts total detection events, not unique incidents
-                    existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_info.get('event_count', 0)
-
-                    # Merge event_types (union of both sets)
-                    existing_types = set(existing_entry.get('event_types', []))
-                    new_types = set(new_info.get('event_types', []))
-                    existing_entry['event_types'] = list(existing_types | new_types)
-
-                    # Keep original first_seen, date_added, reason, confidence, source
-                    # (Don't overwrite with new_info values)
-
-            else:
-                # New IP - add completely
-                merged[ip_str] = new_info
-        
-        # Add manual IPs (they take precedence over automatic)
-        # Manual entries completely override any existing automatic detections
-        for ip_str, manual_info in manual.items():
-            merged[ip_str] = manual_info
-        
-        # Filter whitelisted
-        all_ips = self._filter_whitelisted_ips(merged)
-        new_count = len(set(new_ips_info.keys()) - set(existing.keys()))
-        self.writer.write_blacklist(filename, all_ips, new_count)
+            # Filter whitelisted
+            all_ips = self._filter_whitelisted_ips(merged)
+            new_count = len(set(new_ips_info.keys()) - set(existing.keys()))
+            self.writer.write_blacklist(filename, all_ips, new_count)
+            # Lock automatically released here by context manager
     
     def _get_manual_ips_info(self) -> Dict:
         """Retrieve manual IPs with enriched metadata and timestamps."""

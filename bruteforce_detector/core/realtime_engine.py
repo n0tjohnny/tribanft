@@ -10,6 +10,7 @@ License: GNU GPL v3
 
 import logging
 import time
+import threading
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -39,6 +40,7 @@ class RealtimeDetectionMixin:
         self.realtime_available = False
         self.log_watcher: Optional[LogWatcher] = None
         self.parser_map = {}  # Maps file paths to parser instances
+        self._stop_event = threading.Event()  # RACE CONDITION FIX (C9): Coordinated shutdown
 
         # Check if watchdog is available
         if not WATCHDOG_AVAILABLE:
@@ -229,7 +231,12 @@ class RealtimeDetectionMixin:
 
     def run_realtime(self):
         """
-        Run real-time detection daemon.
+        Run real-time detection daemon with coordinated shutdown.
+
+        RACE CONDITION FIX (C9): Uses threading.Event() for graceful shutdown.
+        - Threads check _stop_event before processing
+        - No race condition between stop signal and event processing
+        - All threads terminate cleanly
 
         Monitors log files continuously using filesystem events.
         Updates state periodically to persist file positions.
@@ -248,13 +255,13 @@ class RealtimeDetectionMixin:
             # Get initial state
             state = self.state_manager.get_state()
 
-            # Run forever, updating state periodically
+            # Run until stop event is set
             last_state_update = time.time()
             state_update_interval = 60  # Save state every minute
 
-            while True:
-                time.sleep(5)  # Check interval
-
+            # RACE CONDITION FIX: Use Event.wait() instead of while True + sleep
+            # This allows immediate response to stop signal
+            while not self._stop_event.wait(timeout=5):
                 # Periodically save file positions
                 now = time.time()
                 if now - last_state_update >= state_update_interval:
@@ -266,7 +273,7 @@ class RealtimeDetectionMixin:
                     last_state_update = now
 
         except KeyboardInterrupt:
-            self.logger.info("Stopping real-time monitoring...")
+            self.logger.info("Stopping real-time monitoring (Ctrl+C)...")
         finally:
             self.log_watcher.stop()
 
@@ -275,6 +282,8 @@ class RealtimeDetectionMixin:
     def run_periodic_fallback(self):
         """
         Fallback to periodic mode if real-time unavailable.
+
+        RACE CONDITION FIX (C9): Uses threading.Event() for graceful shutdown.
 
         Runs detection cycles at regular intervals using traditional
         timestamp-based filtering.
@@ -288,7 +297,8 @@ class RealtimeDetectionMixin:
         try:
             cycle_count = 0
 
-            while True:
+            # RACE CONDITION FIX: Use Event.wait() instead of while True + sleep
+            while not self._stop_event.is_set():
                 cycle_count += 1
                 self.logger.info(f"Detection cycle #{cycle_count} starting...")
 
@@ -300,11 +310,24 @@ class RealtimeDetectionMixin:
                 except Exception as e:
                     self.logger.error(f"Cycle #{cycle_count} failed: {e}")
 
-                # Sleep
+                # Sleep with stop event check for responsive shutdown
                 self.logger.info(f"Sleeping for {interval}s until next cycle...")
-                time.sleep(interval)
+                if self._stop_event.wait(timeout=interval):
+                    break  # Stop event was set during sleep
 
         except KeyboardInterrupt:
-            self.logger.info("Stopping periodic detection...")
+            self.logger.info("Stopping periodic detection (Ctrl+C)...")
 
         self.logger.info("Periodic detection stopped")
+
+    def stop(self):
+        """
+        Stop the real-time detection daemon gracefully.
+
+        RACE CONDITION FIX (C9): Sets stop event to signal all threads to terminate.
+        Provides thread-safe coordinated shutdown.
+
+        Can be called from signal handlers or other threads to trigger shutdown.
+        """
+        self.logger.info("Stop signal received - shutting down...")
+        self._stop_event.set()

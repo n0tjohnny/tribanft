@@ -200,6 +200,26 @@ tribanft --whitelist-add 10.0.0.5 --reason "Monitoring server"
 | verbose | `false` | Enable debug-level logging |
 | log_level | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 
+### [threat_intelligence] - Threat Feed Integration (v2.5+)
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| threat_feeds_enabled | `false` | Enable threat intelligence feed integration |
+| threat_feed_sources | `spamhaus` | Comma-separated list of sources (spamhaus, abuseipdb, alienvault) |
+| threat_feed_cache_hours | `24` | Cache duration for feed results (hours) |
+
+**Enable threat intelligence**:
+```ini
+[threat_intelligence]
+threat_feeds_enabled = true
+threat_feed_sources = spamhaus
+```
+
+**Notes**:
+- Spamhaus DROP/EDROP lists are free (no API key required)
+- AbuseIPDB and AlienVault require free registration for API keys
+- Feed results are cached to minimize API calls
+
 ---
 
 ## Environment Variables
@@ -212,7 +232,7 @@ Override any config option:
 | TRIBANFT_DATA_DIR | data_dir | `/var/lib/tribanft` |
 | TRIBANFT_STATE_DIR | state_dir | `/var/lib/tribanft/state` |
 | IPINFO_TOKEN | IPInfo API token | `your-api-token` |
-| BFD_ENABLE_NFTABLES | enable_nftables_update | `true` or `false` |
+| BFD_ENABLE_NFTABLES_UPDATE | enable_nftables_update | `true` or `false` |
 
 **Set environment variable**:
 ```bash

@@ -59,8 +59,15 @@ if [ $CONFIG_EXIT_CODE -ne 0 ]; then
     exit 1
 fi
 
-# Parse configuration
-eval "$CONFIG_OUTPUT"
+# Parse configuration safely (without eval to prevent command injection)
+while IFS='=' read -r key value; do
+    case "$key" in
+        PROJECT_DIR) PROJECT_DIR="$value" ;;
+        CONFIG_DIR) CONFIG_DIR="$value" ;;
+        STATE_DIR) STATE_DIR="$value" ;;
+        PYTHON_BIN) PYTHON_BIN="$value" ;;
+    esac
+done <<< "$CONFIG_OUTPUT"
 
 echo -e "${GREEN}Configuration loaded${NC}"
 echo -e "   Project directory: ${PROJECT_DIR}"

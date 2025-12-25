@@ -26,17 +26,17 @@ Security event categories.
 
 Full list: `bruteforce_detector/models.py`
 
-### Severity Enum
+### DetectionConfidence Enum
 
-Event severity levels.
+Detection confidence levels.
 
 **Module**: `bruteforce_detector.models`
 
 | Value | Description | Use Case |
 |-------|-------------|----------|
-| `INFO` | Informational | Normal activity logging |
-| `WARNING` | Suspicious activity | Failed login attempts |
-| `CRITICAL` | Active attack | SQL injection, port scans |
+| `LOW` | Weak evidence | Single suspicious event |
+| `MEDIUM` | Moderate evidence | Port scan patterns detected |
+| `HIGH` | Strong evidence | 20+ failed logins in time window |
 
 ### SecurityEvent
 
@@ -47,26 +47,25 @@ Security event extracted from logs.
 ```python
 @dataclass
 class SecurityEvent:
+    source_ip: IPAddress         # IP address object (ipaddress.IPv4Address or IPv6Address)
+    event_type: EventType        # Event category (EventType enum)
     timestamp: datetime          # When event occurred
-    source_ip: str              # Source IP address
-    event_type: EventType        # Event category
-    severity: Severity           # Event severity
-    message: str                 # Human-readable description
-    raw_log: str                 # Original log line
-    source: str                  # Parser name (e.g., "apache")
-    metadata: Dict[str, Any]     # Additional data (optional)
+    source: str                  # Parser name (e.g., "apache", "syslog")
+    raw_message: str             # Original log line
+    metadata: dict               # Additional event-specific data (optional)
 ```
 
 **Example**:
 ```python
+import ipaddress
+from datetime import datetime
+
 event = SecurityEvent(
-    timestamp=datetime.now(),
-    source_ip="1.2.3.4",
+    source_ip=ipaddress.ip_address("1.2.3.4"),  # IPAddress object, NOT string
     event_type=EventType.SQL_INJECTION,
-    severity=Severity.CRITICAL,
-    message="SQL injection attempt",
-    raw_log="GET /search?q=' UNION SELECT...",
+    timestamp=datetime.now(),
     source="apache",
+    raw_message="GET /search?q=' UNION SELECT...",
     metadata={"method": "GET", "uri": "/search", "status": 200}
 )
 ```
@@ -80,25 +79,32 @@ Detection result from a detector.
 ```python
 @dataclass
 class DetectionResult:
-    ip_address: str              # Detected IP
-    reason: str                  # Human-readable reason
-    event_count: int             # Number of events
-    time_window: int             # Time window in seconds
-    severity: Severity           # Detection severity
-    event_type: EventType        # Primary event type
-    detector_name: str           # Detector that created this
+    ip: IPAddress                           # IP to block (IPv4Address or IPv6Address)
+    reason: str                             # Human-readable explanation
+    confidence: DetectionConfidence         # Detection confidence level
+    event_count: int                        # Number of events that triggered detection
+    event_type: EventType                   # Primary event type
+    source_events: List[SecurityEvent]      # Events that caused this detection
+    first_seen: Optional[datetime]          # Timestamp of first event
+    last_seen: Optional[datetime]           # Timestamp of last event
+    geolocation: Optional[Dict]             # Geo data (enriched by BlacklistManager)
 ```
 
 **Example**:
 ```python
+import ipaddress
+from datetime import datetime
+
 result = DetectionResult(
-    ip_address="1.2.3.4",
+    ip=ipaddress.ip_address("1.2.3.4"),     # IPAddress object, NOT string
     reason="SQL injection: 15 attempts in 5 minutes",
+    confidence=DetectionConfidence.HIGH,    # NOT Severity
     event_count=15,
-    time_window=300,
-    severity=Severity.CRITICAL,
     event_type=EventType.SQL_INJECTION,
-    detector_name="sql_injection_detector"
+    source_events=matching_events,          # List[SecurityEvent]
+    first_seen=datetime.now(),
+    last_seen=datetime.now(),
+    geolocation=None
 )
 ```
 
@@ -116,9 +122,9 @@ Base class for all detector plugins.
 
 ```python
 class MyDetector(BaseDetector):
-    def __init__(self, config, blacklist_manager):
-        """Constructor - dependencies injected by PluginManager"""
-        super().__init__(config, blacklist_manager)
+    def __init__(self, config, event_type: EventType):
+        """Constructor - config and event_type injected by PluginManager"""
+        super().__init__(config, event_type)
 
     def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """Main detection logic - process events, return detections"""
@@ -144,21 +150,24 @@ def cleanup(self):
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | config | Config | Configuration object |
-| blacklist_manager | BlacklistManager | Blacklist management |
+| event_type | EventType | Event type this detector handles |
 | logger | Logger | Logger instance |
+| enabled | bool | Whether detector is enabled (based on config) |
+| name | str | Detector class name |
 
 **Helper Methods**:
 
 ```python
 def _create_detection_result(
-    ip: str,
+    ip_str: str,
     reason: str,
+    confidence: str,  # "low", "medium", or "high" - converted to DetectionConfidence
     event_count: int,
-    time_window: int,
-    severity: Severity,
-    event_type: EventType
-) -> DetectionResult:
-    """Helper to create DetectionResult with detector name"""
+    source_events: List[SecurityEvent],
+    first_seen: Optional[datetime] = None,
+    last_seen: Optional[datetime] = None
+) -> Optional[DetectionResult]:
+    """Helper to create DetectionResult with proper timestamps extracted from source_events"""
 ```
 
 See: `bruteforce_detector/detectors/base.py`
@@ -173,9 +182,9 @@ Base class for all parser plugins.
 
 ```python
 class MyParser(BaseLogParser):
-    def __init__(self, config):
-        """Constructor - config injected by PluginManager"""
-        super().__init__(config, "my_parser")
+    def __init__(self, log_path: str):
+        """Constructor - log file path injected by PluginManager"""
+        super().__init__(log_path)
 
     def _parse_line(self, line: str, line_number: int) -> Optional[List[SecurityEvent]]:
         """Parse single log line - return SecurityEvent(s) or None"""

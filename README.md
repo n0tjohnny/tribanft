@@ -69,9 +69,9 @@ Most tools stop at detection. **TribanFT explains the “why” behind the attac
 
 ```bash
 # Download latest release
-wget https://github.com/n0tjohnny/tribanft/archive/v2.5.0.tar.gz
-tar -xzf v2.5.0.tar.gz
-cd tribanft-2.5.0
+wget https://github.com/n0tjohnny/tribanft/archive/v2.5.8.tar.gz
+tar -xzf v2.5.8.tar.gz
+cd tribanft-2.5.8
 
 # Automated installation (one command)
 ./install.sh

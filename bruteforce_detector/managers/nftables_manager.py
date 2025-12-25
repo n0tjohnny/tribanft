@@ -30,6 +30,8 @@ import logging
 import shutil
 import json
 import re
+import tempfile
+import os
 from typing import Set, Dict, Tuple, Optional, List
 import ipaddress
 from datetime import datetime, timezone
@@ -388,14 +390,22 @@ class NFTablesManager:
 
     def update_blacklists(self, blacklisted_ips: Dict[str, Set[ipaddress.IPv4Address | ipaddress.IPv6Address]]):
         """
-        Update nftables sets with blacklisted IPs using optimized batch operations.
+        Update nftables sets with blacklisted IPs using ATOMIC batch operations.
 
-        Performance: ~5 seconds for 37k IPs (vs 90 seconds with small batches)
+        ATOMICITY FIX (C6): Flush + add operations executed as single transaction.
+        - If process crashes mid-operation: either ALL changes apply or NONE apply
+        - Prevents inconsistent firewall state (partial IP lists, empty sets)
+        - Uses nft -f with temporary file for all-or-nothing semantics
 
-        Process:
-        1. Flush existing sets
-        2. Add IPv4 IPs to inet filter blacklist_ipv4 (batches of 1000)
-        3. Add IPv6 IPs to inet filter blacklist_ipv6 (batches of 1000)
+        Performance: ~5 seconds for 37k IPs with crash safety
+
+        Process (atomic transaction):
+        1. Create temporary nftables script file
+        2. Write flush commands for both IPv4 and IPv6 sets
+        3. Write add commands for all IPv4 IPs (batched in 1000 IP chunks)
+        4. Write add commands for all IPv6 IPs (batched in 1000 IP chunks)
+        5. Execute entire script atomically with nft -f
+        6. Clean up temporary file
 
         Args:
             blacklisted_ips: Dict with 'ipv4' and 'ipv6' keys containing IP sets
@@ -405,25 +415,57 @@ class NFTablesManager:
             return
 
         try:
-            ipv4_count = len(blacklisted_ips['ipv4'])
-            ipv6_count = len(blacklisted_ips['ipv6'])
+            ipv4_list = list(blacklisted_ips['ipv4'])
+            ipv6_list = list(blacklisted_ips['ipv6'])
+            ipv4_count = len(ipv4_list)
+            ipv6_count = len(ipv6_list)
 
-            # Flush sets
-            self._flush_set('inet filter blacklist_ipv4')
-            self._flush_set('inet filter blacklist_ipv6')
+            self.logger.info(f"Updating NFTables atomically: {ipv4_count} IPv4, {ipv6_count} IPv6")
 
-            # Add IPs in large batches
-            if blacklisted_ips['ipv4']:
-                batches_v4 = (ipv4_count + self.batch_size - 1) // self.batch_size
-                self.logger.info(f"Adding {ipv4_count} IPv4 in {batches_v4} batches of {self.batch_size}")
-                self._add_ips_to_set('inet filter blacklist_ipv4', blacklisted_ips['ipv4'])
+            # ATOMICITY FIX: Create single transaction for flush + add operations
+            # This ensures all-or-nothing semantics - no partial updates
+            temp_file = None
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.nft', delete=False) as f:
+                    temp_file = f.name
 
-            if blacklisted_ips['ipv6']:
-                batches_v6 = (ipv6_count + self.batch_size - 1) // self.batch_size
-                self.logger.info(f"Adding {ipv6_count} IPv6 in {batches_v6} batches of {self.batch_size}")
-                self._add_ips_to_set('inet filter blacklist_ipv6', blacklisted_ips['ipv6'])
+                    # Flush both sets (part of atomic transaction)
+                    f.write("flush set inet filter blacklist_ipv4\n")
+                    f.write("flush set inet filter blacklist_ipv6\n")
 
-            self.logger.info(f"SUCCESS: Updated NFTables: {ipv4_count} IPv4, {ipv6_count} IPv6")
+                    # Add all IPv4 IPs in batches (within same transaction)
+                    if ipv4_list:
+                        for i in range(0, len(ipv4_list), self.batch_size):
+                            batch = ipv4_list[i:i+self.batch_size]
+                            ip_str = ','.join(str(ip) for ip in batch)
+                            f.write(f"add element inet filter blacklist_ipv4 {{ {ip_str} }}\n")
+
+                    # Add all IPv6 IPs in batches (within same transaction)
+                    if ipv6_list:
+                        for i in range(0, len(ipv6_list), self.batch_size):
+                            batch = ipv6_list[i:i+self.batch_size]
+                            ip_str = ','.join(str(ip) for ip in batch)
+                            f.write(f"add element inet filter blacklist_ipv6 {{ {ip_str} }}\n")
+
+                    f.flush()
+
+                # Execute entire update atomically with nft -f
+                cmd = ['/usr/sbin/nft', '-f', temp_file]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+                if result.returncode != 0:
+                    self.logger.error(f"Atomic NFTables update failed: {result.stderr}")
+                    raise RuntimeError(f"NFTables atomic update failed: {result.stderr}")
+                else:
+                    self.logger.info(f"SUCCESS: Updated NFTables atomically: {ipv4_count} IPv4, {ipv6_count} IPv6")
+
+            finally:
+                # Clean up temporary file
+                if temp_file and os.path.exists(temp_file):
+                    try:
+                        os.unlink(temp_file)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
 
         except Exception as e:
             self.logger.error(f"ERROR: NFTables update failed: {e}")
@@ -447,13 +489,19 @@ class NFTablesManager:
 
     def _add_ips_to_set(self, set_name: str, ips: Set[ipaddress.IPv4Address | ipaddress.IPv6Address]):
         """
-        Add IPs to nftables set in LARGE batches for maximum performance.
+        Add IPs to nftables set using ATOMIC batch operations.
 
-        OPTIMIZED: Uses 1000 IPs per nft call (vs 100 before)
-        Result: 37k IPs in ~40 calls instead of 370 calls
+        ATOMICITY FIX: Uses nft -f with temporary file for all-or-nothing semantics.
+        If the process crashes mid-operation, either:
+        - All IPs are added (transaction completed)
+        - No IPs are added (transaction never started)
+        Never a partial/inconsistent state.
+
+        PERFORMANCE: Processes 1000 IPs per batch command within atomic transaction.
+        Result: 37k IPs in ~5 seconds with crash safety.
 
         Args:
-            set_name: Target nftables set
+            set_name: Target nftables set (e.g., 'inet filter blacklist_ipv4')
             ips: Set of IP address objects to add
         """
         if not ips:
@@ -462,25 +510,44 @@ class NFTablesManager:
         ip_list = list(ips)
         total_batches = (len(ip_list) + self.batch_size - 1) // self.batch_size
 
-        for batch_num, i in enumerate(range(0, len(ip_list), self.batch_size), 1):
-            batch = ip_list[i:i+self.batch_size]
-            ip_str = ','.join(str(ip) for ip in batch)
+        # Create temporary nftables script for atomic execution
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.nft', delete=False) as f:
+                temp_file = f.name
 
+                # Write all add element commands to file
+                # NFTables will execute them atomically when using -f flag
+                for batch_num, i in enumerate(range(0, len(ip_list), self.batch_size), 1):
+                    batch = ip_list[i:i+self.batch_size]
+                    ip_str = ','.join(str(ip) for ip in batch)
+                    f.write(f"add element {set_name} {{ {ip_str} }}\n")
+
+                f.flush()
+
+            # Execute entire script atomically
+            # If this fails, no changes are made to the firewall
+            cmd = ['/usr/sbin/nft', '-f', temp_file]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+            if result.returncode != 0:
+                self.logger.error(f"Atomic batch operation failed: {result.stderr}")
+                raise RuntimeError(f"NFTables atomic update failed: {result.stderr}")
+            else:
+                self.logger.info(f"Atomically added {len(ip_list)} IPs to {set_name}")
+
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"Timeout during atomic batch operation ({len(ip_list)} IPs)")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error during atomic batch operation: {e}")
+            raise
+        finally:
+            # Clean up temporary file
             try:
-                cmd = ['/usr/sbin/nft', 'add', 'element', set_name, '{', ip_str, '}']
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-                if result.returncode != 0:
-                    self.logger.error(f"Batch {batch_num}/{total_batches} failed: {result.stderr}")
-                else:
-                    # Log progress every 10 batches
-                    if batch_num % 10 == 0 or batch_num == total_batches:
-                        self.logger.debug(f"Progress: {batch_num}/{total_batches} batches ({len(batch)} IPs)")
-
-            except subprocess.TimeoutExpired:
-                self.logger.error(f"Timeout on batch {batch_num}/{total_batches}")
+                if temp_file and os.path.exists(temp_file):
+                    os.unlink(temp_file)
             except Exception as e:
-                self.logger.error(f"Error on batch {batch_num}/{total_batches}: {e}")
+                self.logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
 
     # ========================================================================
     # IMPORT OPERATIONS (NFTables → Blacklist)

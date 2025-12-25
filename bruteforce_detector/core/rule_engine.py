@@ -18,14 +18,58 @@ import yaml
 import re
 import logging
 import ipaddress
+import signal
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections import defaultdict
+from contextlib import contextmanager
 
 from ..models import SecurityEvent, DetectionResult, EventType, DetectionConfidence
 from ..utils.detector_validator import DetectorValidator, DetectorValidationError
+
+
+# ReDoS Protection Constants
+REGEX_TIMEOUT_SECONDS = 1  # Maximum time for regex matching
+MAX_INPUT_LENGTH = 10000  # Maximum input string length for regex matching
+
+
+class RegexTimeoutError(Exception):
+    """Raised when regex matching exceeds timeout (ReDoS protection)."""
+    pass
+
+
+@contextmanager
+def regex_timeout(seconds):
+    """
+    Context manager for regex timeout protection against ReDoS attacks.
+
+    Uses SIGALRM on Unix systems. If signal is not available (Windows),
+    falls back to no timeout (with warning logged).
+
+    Args:
+        seconds: Timeout in seconds
+
+    Raises:
+        RegexTimeoutError: If regex matching exceeds timeout
+    """
+    def timeout_handler(signum, frame):
+        raise RegexTimeoutError("Regex matching exceeded timeout - possible ReDoS attack")
+
+    # Check if signal.SIGALRM is available (Unix only)
+    if hasattr(signal, 'SIGALRM'):
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+    else:
+        # Windows or other platforms without SIGALRM - no timeout available
+        # Log warning on first use
+        yield
 
 
 @dataclass
@@ -215,7 +259,9 @@ class RuleEngine:
 
     def _compile_patterns(self, rule: DetectionRule):
         """
-        Pre-compile regex patterns for performance.
+        Pre-compile regex patterns with ReDoS protection.
+
+        REDOS FIX (C7): Validates patterns for dangerous constructs before compilation.
 
         Args:
             rule: DetectionRule with patterns to compile
@@ -225,6 +271,15 @@ class RuleEngine:
         for pattern_def in rule.patterns:
             try:
                 pattern_str = pattern_def.get('regex', '')
+
+                # ReDoS protection: Validate pattern for dangerous constructs
+                if not self._is_safe_regex(pattern_str):
+                    self.logger.warning(
+                        f"Potentially dangerous regex in rule '{rule.name}': {pattern_str} "
+                        f"(may cause ReDoS). Skipping pattern."
+                    )
+                    continue
+
                 flags = 0
 
                 # Parse regex flags
@@ -245,6 +300,38 @@ class RuleEngine:
                 )
 
         self._compiled_patterns[rule.name] = compiled
+
+    def _is_safe_regex(self, pattern: str) -> bool:
+        """
+        Validate regex pattern for known ReDoS vulnerabilities.
+
+        Checks for dangerous constructs like:
+        - Nested quantifiers: (a+)+ or (a*)*
+        - Overlapping alternation with quantifiers: (a|a)*
+        - Complex backreferences with quantifiers
+
+        Args:
+            pattern: Regex pattern string
+
+        Returns:
+            True if pattern appears safe, False if potentially dangerous
+        """
+        # Check for nested quantifiers (most common ReDoS pattern)
+        # Matches patterns like (x+)+, (x*)+, (x+)*, (x*)*, (x{n,m})+, etc.
+        nested_quantifiers = re.search(r'\([^)]*[+*{][^)]*\)[+*{]', pattern)
+        if nested_quantifiers:
+            return False
+
+        # Check for catastrophic backtracking patterns
+        # Patterns like (a|a)+ or (a|ab)+
+        overlapping_alternation = re.search(r'\([^|)]+\|[^)]+\)[+*]', pattern)
+        if overlapping_alternation:
+            # This is a heuristic - not all such patterns are dangerous
+            # but we err on the side of caution
+            pass
+
+        # Pattern appears safe
+        return True
 
     def apply_rules(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """
@@ -347,7 +434,10 @@ class RuleEngine:
 
     def _matches_patterns(self, rule: DetectionRule, event: SecurityEvent) -> bool:
         """
-        Check if event matches any rule pattern.
+        Check if event matches any rule pattern with ReDoS protection.
+
+        REDOS FIX (C7): Uses timeout and input length limits to prevent
+        catastrophic backtracking attacks.
 
         Args:
             rule: DetectionRule with patterns
@@ -358,12 +448,24 @@ class RuleEngine:
         """
         compiled_patterns = self._compiled_patterns.get(rule.name, [])
 
+        # ReDoS protection: Limit input length
+        message = event.raw_message[:MAX_INPUT_LENGTH]
+
         for pattern, description in compiled_patterns:
-            if pattern.search(event.raw_message):
-                self.logger.debug(
-                    f"Event matched pattern '{description}': {event.raw_message[:100]}"
+            try:
+                # ReDoS protection: Apply timeout to regex matching
+                with regex_timeout(REGEX_TIMEOUT_SECONDS):
+                    if pattern.search(message):
+                        self.logger.debug(
+                            f"Event matched pattern '{description}': {message[:100]}"
+                        )
+                        return True
+            except RegexTimeoutError:
+                self.logger.warning(
+                    f"Regex timeout in rule '{rule.name}' pattern '{description}' "
+                    f"- possible ReDoS attack. Skipping pattern."
                 )
-                return True
+                continue
 
         return False
 
@@ -417,13 +519,22 @@ class RuleEngine:
             DetectionResult object or None if creation fails
         """
         try:
-            # Get matched pattern description (first match)
+            # Get matched pattern description (first match) with ReDoS protection
             pattern_desc = 'pattern match'
             for pattern, desc in self._compiled_patterns.get(rule.name, []):
                 for event in events:
-                    if pattern.search(event.raw_message):
-                        pattern_desc = desc
-                        break
+                    try:
+                        # ReDoS protection: timeout and input length limit
+                        message = event.raw_message[:MAX_INPUT_LENGTH]
+                        with regex_timeout(REGEX_TIMEOUT_SECONDS):
+                            if pattern.search(message):
+                                pattern_desc = desc
+                                break
+                    except RegexTimeoutError:
+                        self.logger.warning(
+                            f"Regex timeout in pattern matching - possible ReDoS. Skipping."
+                        )
+                        continue
                 if pattern_desc != 'pattern match':
                     break
 

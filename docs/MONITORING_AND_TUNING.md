@@ -103,7 +103,7 @@ sudo journalctl -u tribanft --since today | \
 
 # Check each IP
 while read ip; do
-  tribanft --ip-info "$ip"
+  tribanft --query-ip "$ip"
 done < today_blocks.txt
 ```
 

@@ -26,9 +26,10 @@ check_python() {
         exit 1
     fi
 
+    REQUIRED="3.8"
     python_version=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-    if [ "$(printf '%s\n' "$REQUIRED" "$PY_VERSION" | sort -V | head -n1)" != "$REQUIRED" ]; then
-        echo "[ERROR] Python 3.8+ required (found $PY_VERSION)"
+    if [ "$(printf '%s\n' "$REQUIRED" "$python_version" | sort -V | head -n1)" != "$REQUIRED" ]; then
+        echo_error "Python 3.8+ required (found $python_version)"
         exit 1
     fi
     echo_info "Python $python_version OK"

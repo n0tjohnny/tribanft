@@ -105,7 +105,7 @@ def load_config_file() -> dict:
     # All other sections -> BFD_* environment variables
     for section in ['detection', 'features', 'storage', 'performance',
                     'logs', 'data_files', 'state_files', 'ipinfo',
-                    'nftables', 'advanced', 'realtime']:
+                    'nftables', 'advanced', 'realtime', 'threat_intelligence']:
         if parser.has_section(section):
             for key, value in parser.items(section):
                 # Expand tilde in paths
@@ -278,6 +278,9 @@ class DetectorConfig(BaseSettings):
     mssql_error_log_path: str = "/var/opt/mssql/log/errorlog"
     apache_access_log_path: Optional[str] = None
     nginx_access_log_path: Optional[str] = None
+    ftp_log_path: Optional[str] = None
+    smtp_log_path: Optional[str] = None
+    dns_log_path: Optional[str] = None
 
     # === Data Files ===
     blacklist_ipv4_file: Optional[str] = None
@@ -350,6 +353,11 @@ class DetectorConfig(BaseSettings):
     nftables_auto_discovery: bool = False
     nftables_import_sets: Optional[str] = None  # Comma-separated sets (family:table:set)
 
+    # === Threat Intelligence (NEW in v2.5) ===
+    threat_feeds_enabled: bool = False
+    threat_feed_sources: str = "spamhaus"
+    threat_feed_cache_hours: int = 24
+
     model_config = {
         'env_prefix': 'BFD_',
         'case_sensitive': False
@@ -413,6 +421,18 @@ class DetectorConfig(BaseSettings):
         nginx_log = _get_from_sources('nginx_access_log_path', config_dict)
         if nginx_log:
             self.nginx_access_log_path = nginx_log
+
+        ftp_log = _get_from_sources('ftp_log_path', config_dict)
+        if ftp_log:
+            self.ftp_log_path = ftp_log
+
+        smtp_log = _get_from_sources('smtp_log_path', config_dict)
+        if smtp_log:
+            self.smtp_log_path = smtp_log
+
+        dns_log = _get_from_sources('dns_log_path', config_dict)
+        if dns_log:
+            self.dns_log_path = dns_log
 
         # === CRITICAL FIX: Load all settings from config.conf ===
         # Pydantic only reads from environment variables by default.
@@ -536,6 +556,28 @@ class DetectorConfig(BaseSettings):
         if nftables_import_str is not None:
             self.nftables_import_sets = nftables_import_str.strip()
             logger.debug(f"DEBUG: CONFIG: nftables_import_sets = {nftables_import_str}")
+
+        # Threat Intelligence settings (NEW in v2.5)
+        threat_enabled_str = _get_from_sources('threat_feeds_enabled', config_dict)
+        if threat_enabled_str is not None:
+            try:
+                self.threat_feeds_enabled = _parse_bool(threat_enabled_str, 'threat_feeds_enabled')
+                logger.debug(f"DEBUG: CONFIG: threat_feeds_enabled = {threat_enabled_str}")
+            except ValueError as e:
+                logger.warning(str(e))
+
+        threat_sources_str = _get_from_sources('threat_feed_sources', config_dict)
+        if threat_sources_str is not None:
+            self.threat_feed_sources = threat_sources_str.strip()
+            logger.debug(f"DEBUG: CONFIG: threat_feed_sources = {threat_sources_str}")
+
+        threat_cache_str = _get_from_sources('threat_feed_cache_hours', config_dict)
+        if threat_cache_str is not None:
+            try:
+                self.threat_feed_cache_hours = int(threat_cache_str)
+                logger.debug(f"DEBUG: CONFIG: threat_feed_cache_hours = {threat_cache_str}")
+            except ValueError:
+                logger.warning(f"Invalid integer value for threat_feed_cache_hours: {threat_cache_str}")
 
         data_dir = Path(self.data_dir)
         state_dir = Path(self.state_dir)

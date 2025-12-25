@@ -259,6 +259,54 @@ Unbound:
 
 ---
 
+## Threat Intelligence Detector (threat_feed.py) [NEW in v2.5]
+
+**Detector Type:** Threat feed integration (not a traditional parser)
+
+### EventTypes Generated
+
+| EventType | Trigger Condition | Data Source |
+|-----------|------------------|-------------|
+| `KNOWN_MALICIOUS_IP` | IP found in external threat intelligence feeds | AbuseIPDB, Spamhaus DROP/EDROP, AlienVault OTX |
+
+### Detection Logic
+
+```python
+# threat_feed.py:44-200
+# Query threat intelligence feeds for IPs
+for ip in detected_ips:
+    # Check cache first (24h TTL)
+    if ip in cache and not cache_expired(ip):
+        if cache[ip]['is_malicious']:
+            events.append(KNOWN_MALICIOUS_IP)
+    else:
+        # Query configured feeds
+        for feed in ['spamhaus', 'abuseipdb', 'alienvault']:
+            if feed_reports_malicious(feed, ip):
+                cache[ip] = {'is_malicious': True}
+                events.append(KNOWN_MALICIOUS_IP)
+                break
+```
+
+### Configuration
+
+```ini
+[threat_intelligence]
+threat_feeds_enabled = true
+threat_feed_sources = spamhaus,abuseipdb
+threat_feed_cache_hours = 24
+```
+
+### Supported Feeds
+
+| Feed | Description | API Key Required |
+|------|-------------|------------------|
+| **Spamhaus** | DROP/EDROP lists (known spam/malware sources) | No (free) |
+| **AbuseIPDB** | Community-driven IP abuse database | Yes (free tier: 1,000/day) |
+| **AlienVault OTX** | Open Threat Exchange indicators | Yes (free) |
+
+---
+
 ## EventTypes NOT Currently Generated
 
 These EventTypes exist in `models.py` but **no parser currently generates them**:

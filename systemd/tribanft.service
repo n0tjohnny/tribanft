@@ -10,7 +10,7 @@ Group=root
 
 # Main service command - runs in real-time daemon mode
 # Automatically uses real-time monitoring (inotify/kqueue) with fallback to periodic mode
-ExecStart=/usr/bin/python3 /usr/local/bin/tribanft --daemon
+ExecStart=/usr/bin/python3 /root/.local/bin/tribanft --daemon
 
 # Restart policy
 Restart=on-failure

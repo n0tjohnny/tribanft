@@ -13,6 +13,7 @@ Reference for built-in parsers and YAML pattern system.
 | ApacheParser | Combined format | HTTP_REQUEST, HTTP_ERROR_4XX, HTTP_ERROR_5XX, SQL_INJECTION, WORDPRESS_ATTACK, FAILED_LOGIN, XSS_ATTACK, PATH_TRAVERSAL, COMMAND_INJECTION, FILE_UPLOAD_MALICIOUS | apache.yaml |
 | FTPParser | FTP logs | FTP_ATTACK | ftp.yaml |
 | SMTPParser | Mail logs | SMTP_ATTACK | smtp.yaml |
+| DNSParser | DNS logs (BIND9, dnsmasq, Unbound) | DNS_ATTACK | dns.yaml |
 | NFTablesParser | Kernel firewall logs | PORT_SCAN, NETWORK_SCAN | nftables.yaml |
 
 ---
