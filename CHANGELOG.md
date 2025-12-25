@@ -140,6 +140,13 @@ Major feature release implementing missing EventTypes and threat intelligence in
   - export_json() - JSON export with full metadata
   - File: bruteforce_detector/utils/query_tool.py (+200 lines)
 
+
+### Documentation
+
+- **COMMANDS.md** - Comprehensive command reference documentation
+  - Complete reference for all 40+ tribanft CLI commands
+  - File: docs/COMMANDS.md (600+ lines)
+
 ### Changed
 
 - **models.py** - Added DNS_ATTACK EventType to Protocol-Specific section
