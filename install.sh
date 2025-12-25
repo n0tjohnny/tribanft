@@ -72,13 +72,46 @@ install_files() {
 
     mkdir -p "$INSTALL_DIR"
 
+    # Copy Python package and supporting files
     cp -r "$SCRIPT_DIR/bruteforce_detector" "$INSTALL_DIR/"
     cp -r "$SCRIPT_DIR/scripts" "$INSTALL_DIR/"
     [ -d "$SCRIPT_DIR/systemd" ] && cp -r "$SCRIPT_DIR/systemd" "$INSTALL_DIR/"
 
+    # Copy setup.py and dependencies needed for package installation
+    cp "$SCRIPT_DIR/setup.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/config.conf.template" "$INSTALL_DIR/"
+    [ -f "$SCRIPT_DIR/README.md" ] && cp "$SCRIPT_DIR/README.md" "$INSTALL_DIR/"
+    [ -f "$SCRIPT_DIR/LICENSE" ] && cp "$SCRIPT_DIR/LICENSE" "$INSTALL_DIR/"
+
     chmod +x "$INSTALL_DIR/scripts"/*.sh
 
     echo_info "Files installed"
+}
+
+# Install package
+install_package() {
+    echo_info "Installing TribanFT package..."
+
+    # Change to install directory where we copied setup.py
+    cd "$INSTALL_DIR"
+
+    # Install package in editable mode from install directory
+    # This creates ~/.local/bin/tribanft entry point
+    # Editable mode keeps code in ~/.local/share/tribanft (current architecture)
+    if ! pip3 install --user -e . ; then
+        echo_error "Failed to install package"
+        exit 1
+    fi
+
+    # Verify entry point was created
+    if [ -f "$HOME/.local/bin/tribanft" ]; then
+        echo_info "✓ Entry point created: $HOME/.local/bin/tribanft"
+    else
+        echo_error "Entry point not found at $HOME/.local/bin/tribanft"
+        exit 1
+    fi
+
+    echo_info "Package installation completed"
 }
 
 # Setup configuration
@@ -154,6 +187,7 @@ main() {
     backup_existing
     install_files
     setup_config
+    install_package
     validate_install
     setup_systemd
 

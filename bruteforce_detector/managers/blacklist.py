@@ -172,7 +172,7 @@ class BlacklistManager:
             ip = ipaddress.ip_address(ip_str)
 
             # Remove from storage (database + files)
-            success = self.storage.remove_ip(ip_str)
+            success = self.writer.remove_ip(ip_str)
 
             if success:
                 # Remove from NFTables if sync enabled
