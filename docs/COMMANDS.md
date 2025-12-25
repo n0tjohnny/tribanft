@@ -3,7 +3,7 @@
 ```
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║ TribanFT Command Reference                                                ║
-║ Author: TribanFT Project | License: GNU GPL v3 | Updated: 2025-12-25     ║
+║ Author: TribanFT Project | License: GNU GPL v3 | Updated: 2025-12-25      ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 ```
 
