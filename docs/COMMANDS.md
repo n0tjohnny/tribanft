@@ -74,10 +74,6 @@
 # Systemd
 sudo systemctl {start|stop|restart|status|enable|disable} tribanft
 sudo journalctl -u tribanft -f          # Live logs
-
-# NFTables
-sudo nft list set inet filter blacklist_ipv4
-sudo nft list set inet filter blacklist_ipv6
 ```
 
 ---
