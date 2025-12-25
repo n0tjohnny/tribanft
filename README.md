@@ -301,6 +301,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all options.
 
 | Document | Description |
 |----------|-------------|
+| [COMMANDS.md](docs/COMMANDS.md) | Complete command reference for all CLI commands |
 | [QUICK_DEPLOY.md](docs/QUICK_DEPLOY.md) | Installation and deployment guide |
 | [PARSER_EVENTTYPES_MAPPING.md](docs/PARSER_EVENTTYPES_MAPPING.md) | Parser capabilities matrix and validation guide |
 | [RULE_SYNTAX.md](docs/RULE_SYNTAX.md) | YAML rule syntax reference |

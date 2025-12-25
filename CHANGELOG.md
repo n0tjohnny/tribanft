@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Documentation
+
+- **COMMANDS.md** - Comprehensive command reference documentation
+  - Complete reference for all 40+ tribanft CLI commands
+  - Organized in 9 command categories with tables
+  - Helper scripts documentation (tribanft-ipinfo-batch.py, setup scripts)
+  - System commands (systemd service management, NFTables verification)
+  - 6 real-world command workflows
+  - Database mode requirements table
+  - Troubleshooting section with common errors and solutions
+  - Command cheatsheet for quick reference
+  - Copy-paste ready examples throughout
+  - File: docs/COMMANDS.md (600+ lines)
+
+---
+
 ## [2.5.0] - 2025-12-24
 
 ### Threat Intelligence & Missing Pieces Release
