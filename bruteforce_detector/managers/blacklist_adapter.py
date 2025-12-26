@@ -21,6 +21,7 @@ License: GNU GPL v3
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, Set, Optional
 from datetime import datetime
@@ -50,6 +51,9 @@ class BlacklistAdapter:
         self.logger = logging.getLogger(__name__)
         self.use_database = use_database
 
+        # Thread safety for file operations (H3 fix)
+        self._file_lock = threading.Lock()
+
         # Always create file writer for sync capability
         self.file_writer = BlacklistWriter(config)
 
@@ -64,11 +68,11 @@ class BlacklistAdapter:
     
     def read_blacklist(self, filename: str) -> Dict[str, Dict]:
         """
-        Read blacklist from storage (file or database).
-        
+        Read blacklist from storage (file or database, thread-safe).
+
         Args:
             filename: File path (used to determine IP version for database queries)
-            
+
         Returns:
             Dict mapping IP strings to metadata dictionaries
         """
@@ -79,10 +83,11 @@ class BlacklistAdapter:
                 ip_version = 4
             elif 'ipv6' in filename.lower():
                 ip_version = 6
-            
+
             return self.db.get_all_ips(ip_version=ip_version)
         else:
-            return self.file_writer.read_blacklist(filename)
+            with self._file_lock:
+                return self.file_writer.read_blacklist(filename)
     
     def write_blacklist(self, filename: str, ips_info: Dict[str, Dict], new_count: int = 0):
         """
@@ -157,42 +162,45 @@ class BlacklistAdapter:
                 geo_pct = (with_geo / stats['total_ips']) * 100
                 self.logger.info(f"   With Geo: {with_geo} ({geo_pct:.1f}%)")
                 
-                # SYNC TO FILE WHEN ENABLED
+                # SYNC TO FILE WHEN ENABLED (thread-safe)
                 if getattr(self.config, 'sync_to_file', True):
                     self.logger.debug(f"Syncing {len(ips_info)} IPs to {filename}")
-                    try:
-                        self.file_writer.write_blacklist(filename, ips_info, new_count)
-                        self.logger.debug(f"SUCCESS: File sync completed for {filename}")
-                    except Exception as e:
-                        self.logger.warning(f"WARNING: File sync failed: {e}")
+                    with self._file_lock:
+                        try:
+                            self.file_writer.write_blacklist(filename, ips_info, new_count)
+                            self.logger.debug(f"SUCCESS: File sync completed for {filename}")
+                        except Exception as e:
+                            self.logger.warning(f"WARNING: File sync failed: {e}")
         else:
-            self.file_writer.write_blacklist(filename, ips_info, new_count)
+            with self._file_lock:
+                self.file_writer.write_blacklist(filename, ips_info, new_count)
     
     def _load_whitelist(self) -> Set[str]:
-        """Load whitelisted IPs from whitelist file."""
+        """Load whitelisted IPs from whitelist file (thread-safe)."""
         whitelist = set()
         whitelist_path = Path(self.config.whitelist_file)
 
         if whitelist_path.exists():
-            try:
-                with open(whitelist_path, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            try:
-                                # Validate IP address
-                                ipaddress.ip_address(line)
-                                whitelist.add(line)
-                            except ValueError:
-                                pass
-            except Exception as e:
-                self.logger.warning(f"Failed to load whitelist: {e}")
+            with self._file_lock:
+                try:
+                    with open(whitelist_path, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                try:
+                                    # Validate IP address
+                                    ipaddress.ip_address(line)
+                                    whitelist.add(line)
+                                except ValueError:
+                                    pass
+                except Exception as e:
+                    self.logger.warning(f"Failed to load whitelist: {e}")
 
         return whitelist
 
     def get_manual_ips(self, manual_blacklist_file: str) -> Set[str]:
         """
-        Retrieve manually added IPs.
+        Retrieve manually added IPs (thread-safe).
 
         Args:
             manual_blacklist_file: Path to manual blacklist file
@@ -208,7 +216,8 @@ class BlacklistAdapter:
                 if info.get('source') == 'manual'
             }
         else:
-            return self.file_writer.get_manual_ips(manual_blacklist_file)
+            with self._file_lock:
+                return self.file_writer.get_manual_ips(manual_blacklist_file)
     
     def migrate_from_files(self):
         """
@@ -243,10 +252,11 @@ class BlacklistAdapter:
                 continue
             
             self.logger.info(f"Migrating: {path.name}")
-            
-            # Read using BlacklistWriter
+
+            # Read using BlacklistWriter (thread-safe)
             writer = BlacklistWriter(self.config)
-            ips_info = writer.read_blacklist(str(path))
+            with self._file_lock:
+                ips_info = writer.read_blacklist(str(path))
             
             if ips_info:
                 # Determine source from filename
@@ -303,16 +313,17 @@ class BlacklistAdapter:
             self.create_backup(Path(output_file))
         
         ips_info = self.db.get_all_ips(ip_version=ip_version)
-        
-        # Use BlacklistWriter for formatting
+
+        # Use BlacklistWriter for formatting (thread-safe)
         writer = BlacklistWriter(self.config)
-        writer.write_blacklist(output_file, ips_info, len(ips_info))
-        
+        with self._file_lock:
+            writer.write_blacklist(output_file, ips_info, len(ips_info))
+
         self.logger.info(f"   Exported {len(ips_info)} IPs")
     
     def create_backup(self, file_path: Path) -> Optional[Path]:
         """
-        Create timestamped backup of file.
+        Create timestamped backup of file (thread-safe).
 
         Args:
             file_path: Path to file to backup
@@ -325,20 +336,22 @@ class BlacklistAdapter:
 
         backup_dir = self.config.get_backup_dir()
         backup_dir.mkdir(parents=True, exist_ok=True)
-        
+
         from datetime import datetime
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_path = backup_dir / f"{file_path.name}.backup.{timestamp}"
-        
-        import shutil
-        shutil.copy2(file_path, backup_path)
-        self.logger.info(f"Backup: {backup_path.name}")
-        
-        # Keep only last 20 backups
-        backups = sorted(backup_dir.glob(f"{file_path.name}.backup.*"))
-        for old_backup in backups[:-20]:
-            old_backup.unlink()
-            self.logger.debug(f"Removed old backup: {old_backup.name}")
+
+        # File operations must be atomic (H3 fix)
+        with self._file_lock:
+            import shutil
+            shutil.copy2(file_path, backup_path)
+            self.logger.info(f"Backup: {backup_path.name}")
+
+            # Keep only last 20 backups
+            backups = sorted(backup_dir.glob(f"{file_path.name}.backup.*"))
+            for old_backup in backups[:-20]:
+                old_backup.unlink()
+                self.logger.debug(f"Removed old backup: {old_backup.name}")
         
         return backup_path
     
@@ -436,7 +449,7 @@ class BlacklistAdapter:
 
     def _remove_from_files(self, ip_str: str) -> bool:
         """
-        Remove IP from blacklist text files.
+        Remove IP from blacklist text files (thread-safe).
 
         Args:
             ip_str: IP address to remove
@@ -458,45 +471,47 @@ class BlacklistAdapter:
                 self.logger.warning(f"Blacklist file {filepath} not found")
                 return False
 
-            # Read all lines
-            with open(filepath, 'r') as f:
-                lines = f.readlines()
+            # Read-modify-write operation must be atomic (H3 fix)
+            with self._file_lock:
+                # Read all lines
+                with open(filepath, 'r') as f:
+                    lines = f.readlines()
 
-            # Filter out the IP (including its metadata comments)
-            new_lines = []
-            skip_next = False
-            found = False
+                # Filter out the IP (including its metadata comments)
+                new_lines = []
+                skip_next = False
+                found = False
 
-            for i, line in enumerate(lines):
-                stripped = line.strip()
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
 
-                # Skip comments for IP we're removing
-                if skip_next:
-                    if stripped.startswith('#'):
+                    # Skip comments for IP we're removing
+                    if skip_next:
+                        if stripped.startswith('#'):
+                            continue
+                        else:
+                            skip_next = False
+
+                    # Check if this is the IP line
+                    if stripped == ip_str:
+                        found = True
+                        skip_next = True  # Skip subsequent comment lines
+                        # Skip lines above this IP (metadata comments)
+                        while new_lines and new_lines[-1].strip().startswith('#'):
+                            new_lines.pop()
                         continue
-                    else:
-                        skip_next = False
 
-                # Check if this is the IP line
-                if stripped == ip_str:
-                    found = True
-                    skip_next = True  # Skip subsequent comment lines
-                    # Skip lines above this IP (metadata comments)
-                    while new_lines and new_lines[-1].strip().startswith('#'):
-                        new_lines.pop()
-                    continue
+                    new_lines.append(line)
 
-                new_lines.append(line)
-
-            if found:
-                # Write back without the removed IP
-                with open(filepath, 'w') as f:
-                    f.writelines(new_lines)
-                self.logger.info(f"Removed {ip_str} from {filepath.name}")
-                return True
-            else:
-                self.logger.warning(f"IP {ip_str} not found in {filepath.name}")
-                return False
+                if found:
+                    # Write back without the removed IP
+                    with open(filepath, 'w') as f:
+                        f.writelines(new_lines)
+                    self.logger.info(f"Removed {ip_str} from {filepath.name}")
+                    return True
+                else:
+                    self.logger.warning(f"IP {ip_str} not found in {filepath.name}")
+                    return False
 
         except (ValueError, ipaddress.AddressValueError):
             self.logger.error(f"Invalid IP address: {ip_str}")

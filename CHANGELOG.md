@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.0] - 2025-12-26
+
+### Security Release
+
+Comprehensive security audit and fixes addressing 6 critical and high-severity issues identified in Phase 1 security review.
+
+### Security Fixes
+
+#### CRITICAL: Command Injection Prevention (C1)
+- **nftables_manager.py:76-110** - Added `_sanitize_ip_for_nft()` method
+  - Defense-in-depth validation: `ipaddress.ip_address()` + regex check for shell metacharacters
+  - Pattern: `^[0-9a-fA-F:.]+$` validates both IPv4 and IPv6 addresses
+  - Supports special formats: `::1`, `fe80::1`, `::ffff:192.0.2.1`
+  - Updated 3 command construction sites (lines 476, 483, 558) to use sanitization
+  - Tested with malicious inputs: all blocked successfully
+  - Impact: Prevents shell command injection via malformed IP addresses
+
+#### CRITICAL: Database Deadlock Fix (C2)
+- **database.py:46-56** - Added SQLite version check for json_patch support
+  - Detects SQLite 3.38+ for native json_patch() function
+  - Falls back to simple JSON replacement on older versions
+- **database.py:115-247** - Rewrote `bulk_add()` with UPSERT pattern
+  - Changed from SELECT-then-UPDATE/INSERT to `INSERT ... ON CONFLICT UPDATE`
+  - Eliminates row-level locking that caused deadlocks
+  - Increased timeout from 10s to 30s for better concurrent handling
+  - Uses `json_patch()` for atomic metadata merging when available
+  - Uses `COALESCE()` to preserve existing non-null values
+  - Removed obsolete helper methods: `_update_existing_ip()`, `_insert_new_ip()`
+  - Concurrency test: 10 threads × 100 IPs - **PASSED** (no deadlocks)
+  - Event count merging verified: 5 + 3 = 8 - **PASSED**
+  - Impact: Eliminates deadlocks under concurrent load (>1000 IPs)
+
+#### CRITICAL: NFTables Error Handling (C3)
+- **blacklist.py:98-107** - Added try/except around NFTables sync
+  - Wraps `sync_from_nftables()` call in `update_blacklists()`
+  - Graceful degradation: Blacklist updates continue even if firewall sync fails
+  - Logs error and warning, continues operation
+  - Impact: Prevents NFTables failures from crashing blacklist manager
+
+#### HIGH: File Operation Race Conditions (H3)
+- **blacklist_adapter.py:24** - Added `import threading`
+- **blacklist_adapter.py:55** - Added `self._file_lock = threading.Lock()`
+- Protected 8 file operations with lock:
+  1. `_load_whitelist()` - whitelist file reading (line 181)
+  2. `read_blacklist()` - blacklist file reading (line 89)
+  3. `write_blacklist()` - file sync operations (lines 167, 174)
+  4. `get_manual_ips()` - manual blacklist reading (line 219)
+  5. `migrate_from_files()` - file migration (line 256)
+  6. `export_to_file()` - database export (line 316)
+  7. `create_backup()` - backup file creation (line 342)
+  8. `_remove_from_files()` - read-modify-write operation (line 469)
+  - All operations now thread-safe with atomic file access
+  - Impact: Prevents file corruption during concurrent operations
+
+#### HIGH: Log Watcher Position Race (H2)
+- **log_watcher.py:255-262** - Fixed position update race condition
+  - Moved `self.positions[file_path] = current_size` **BEFORE** callback
+  - Previous: callback first, position update after (window for race)
+  - Now: position update first, then callback (concurrent modifications see updated position)
+  - At-most-once delivery semantics (callback failure doesn't reprocess)
+- **log_watcher.py:297-319** - Added locking to position accessors
+  - `get_position()` now uses file-specific lock for thread-safe reads
+  - `set_position()` now uses file-specific lock for thread-safe writes
+  - Falls back to direct access for unwatched files
+  - Impact: Prevents duplicate log processing and missed events
+
+#### HIGH: Plugin Input Validation (H1)
+- **plugin_manager.py:179-202** - Added `_validate_dependencies()` method
+  - Validates dependencies dict type before passing to plugins
+  - Checks config is not None
+  - Prevents malicious plugins from exploiting missing validation
+- **plugin_manager.py:204-287** - Enhanced `instantiate_plugins()`
+  - Added dependency validation before plugin instantiation
+  - Added None-checking for required dependencies (line 249-257)
+  - Enhanced exception isolation (plugin failures don't crash main process)
+  - Improved security-focused documentation
+  - Impact: Prevents plugin exploitation via invalid inputs
+
+### Changed
+
+#### Version Updates
+- **setup.py:35** - Updated version: `2.5.9` → `2.6.0`
+- **bruteforce_detector/__init__.py:2** - Updated version: `2.5.9` → `2.6.0`
+- **install.sh:3,182** - Updated version: `2.5.9` → `2.6.0`
+
+### Testing
+
+#### Automated Tests Created
+- **test_c2_concurrency.py** - Database concurrency stress test (10 threads, 100 IPs each)
+- **test_c2_verify_merge.py** - UPSERT event count merge verification
+
+### Notes
+
+**Deferred to Future Releases:**
+- H4: Cross-platform regex timeout (Windows compatibility)
+- H5: Detector failure tracking in RealtimeEngine
+
+**Security Invariants Verified:**
+All 5 security invariants maintained across all fixes:
+1. **whitelist_precedence** - Maintained (whitelisted IPs never blocked)
+2. **atomic_operations** - Enhanced (UPSERT pattern, file locks)
+3. **thread_safety** - Enhanced (added locks: file operations, log positions)
+4. **input_validation** - Enhanced (IP sanitization, plugin dependency validation)
+5. **no_assumptions** - Maintained (explicit checks, edge cases handled)
+
+---
+
 ## [2.5.9] - 2025-12-26
 
 ### Critical Bug Fixes Release

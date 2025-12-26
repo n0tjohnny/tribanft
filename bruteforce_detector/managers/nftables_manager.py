@@ -73,6 +73,42 @@ class NFTablesManager:
             self.event_log_path = state_dir / 'nftables_events.jsonl'
             self.logger.info(f"NFTables event log enabled: {self.event_log_path}")
 
+    def _sanitize_ip_for_nft(self, ip) -> str:
+        """
+        Validate and sanitize IP address for nftables command injection prevention.
+
+        Defense-in-depth: While ipaddress.ip_address() validates format,
+        this adds explicit check for shell metacharacters to prevent
+        command injection via malformed IP objects.
+
+        Args:
+            ip: IP address (string or ipaddress object)
+
+        Returns:
+            Validated IP string safe for nftables commands
+
+        Raises:
+            ValueError: If IP contains shell metacharacters
+
+        Security:
+            Prevents command injection attacks where malicious input like
+            "1.2.3.4 } ; nft delete table" could execute arbitrary commands.
+        """
+        # Primary validation via ipaddress module
+        ip_obj = ipaddress.ip_address(str(ip))
+        ip_str = str(ip_obj)
+
+        # Defense-in-depth: Reject shell metacharacters
+        # IPv4: 0-9 and dots
+        # IPv6: 0-9, a-f, A-F, colons, dots (for IPv4-mapped)
+        if not re.match(r'^[0-9a-fA-F:.]+$', ip_str):
+            raise ValueError(
+                f"IP address contains invalid characters: {ip_str}\n"
+                f"This may indicate a command injection attempt."
+            )
+
+        return ip_str
+
     # ========================================================================
     # DISCOVERY OPERATIONS (NFTables → Catalog)
     # ========================================================================
@@ -437,14 +473,14 @@ class NFTablesManager:
                     if ipv4_list:
                         for i in range(0, len(ipv4_list), self.batch_size):
                             batch = ipv4_list[i:i+self.batch_size]
-                            ip_str = ','.join(str(ip) for ip in batch)
+                            ip_str = ','.join(self._sanitize_ip_for_nft(ip) for ip in batch)
                             f.write(f"add element inet filter blacklist_ipv4 {{ {ip_str} }}\n")
 
                     # Add all IPv6 IPs in batches (within same transaction)
                     if ipv6_list:
                         for i in range(0, len(ipv6_list), self.batch_size):
                             batch = ipv6_list[i:i+self.batch_size]
-                            ip_str = ','.join(str(ip) for ip in batch)
+                            ip_str = ','.join(self._sanitize_ip_for_nft(ip) for ip in batch)
                             f.write(f"add element inet filter blacklist_ipv6 {{ {ip_str} }}\n")
 
                     f.flush()
@@ -519,7 +555,7 @@ class NFTablesManager:
                 # NFTables will execute them atomically when using -f flag
                 for batch_num, i in enumerate(range(0, len(ip_list), self.batch_size), 1):
                     batch = ip_list[i:i+self.batch_size]
-                    ip_str = ','.join(str(ip) for ip in batch)
+                    ip_str = ','.join(self._sanitize_ip_for_nft(ip) for ip in batch)
                     f.write(f"add element {set_name} {{ {ip_str} }}\n")
 
                 f.flush()

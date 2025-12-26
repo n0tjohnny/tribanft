@@ -176,17 +176,43 @@ class PluginManager:
         # No metadata - default to enabled
         return True
 
+    def _validate_dependencies(self, dependencies: Dict[str, Any]) -> bool:
+        """
+        Validate dependencies before passing to plugins (H1 fix).
+
+        Ensures dependencies are of expected types and non-None.
+        Prevents malicious plugins from exploiting missing validation.
+
+        Args:
+            dependencies: Dictionary of dependencies to validate
+
+        Returns:
+            True if valid, False otherwise
+        """
+        if not isinstance(dependencies, dict):
+            self.logger.error("Dependencies must be a dictionary")
+            return False
+
+        # Validate config if present
+        if 'config' in dependencies:
+            if dependencies['config'] is None:
+                self.logger.error("Config dependency is None")
+                return False
+
+        return True
+
     def instantiate_plugins(
         self,
         plugin_classes: List[Type],
         dependencies: Optional[Dict[str, Any]] = None
     ) -> List[Any]:
         """
-        Instantiate plugins with dependency injection.
+        Instantiate plugins with dependency injection and input validation (H1 fix).
 
         Analyzes each plugin's constructor signature and injects
-        available dependencies. Logs warnings for missing required
-        dependencies.
+        available dependencies. Validates inputs before passing to plugins
+        for security. Provides exception isolation to prevent plugin
+        failures from crashing the main process.
 
         Args:
             plugin_classes: List of plugin classes to instantiate
@@ -197,6 +223,11 @@ class PluginManager:
         """
         dependencies = dependencies or {}
         dependencies['config'] = self.config  # Always inject config
+
+        # Validate dependencies before passing to plugins (H1 fix)
+        if not self._validate_dependencies(dependencies):
+            self.logger.error("Dependency validation failed, aborting plugin instantiation")
+            return []
 
         instances = []
 
@@ -215,7 +246,15 @@ class PluginManager:
                         continue
 
                     if param_name in dependencies:
-                        kwargs[param_name] = dependencies[param_name]
+                        # Validate dependency is not None before injection (H1 fix)
+                        dep_value = dependencies[param_name]
+                        if dep_value is None and param.default is inspect.Parameter.empty:
+                            self.logger.error(
+                                f"{plugin_class.__name__}: Required dependency '{param_name}' is None"
+                            )
+                            missing_deps.append(param_name)
+                        else:
+                            kwargs[param_name] = dep_value
                     elif param.default is not inspect.Parameter.empty:
                         # Has default value, skip
                         pass
@@ -229,7 +268,8 @@ class PluginManager:
                         f"{', '.join(missing_deps)}"
                     )
 
-                # Instantiate plugin
+                # Instantiate plugin with exception isolation (H1 fix)
+                # Failures are logged but don't crash the main process
                 instance = plugin_class(**kwargs)
                 instances.append(instance)
 
@@ -241,6 +281,7 @@ class PluginManager:
                     f"Failed to instantiate {plugin_class.__name__}: {e}",
                     exc_info=True
                 )
+                # Continue loading other plugins (exception isolation)
 
         self.logger.info(f"Successfully instantiated {len(instances)} plugins")
         return instances

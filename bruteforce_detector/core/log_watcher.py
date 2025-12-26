@@ -252,11 +252,14 @@ class LogWatcher:
                 if current_size == last_position:
                     return
 
-                # Trigger callback with offset range
-                self.callback(file_path, last_position, current_size)
-
-                # Update position
+                # Update position BEFORE callback to prevent race condition (H2 fix)
+                # This ensures concurrent modifications see the updated position
+                # even if the callback takes time to execute
                 self.positions[file_path] = current_size
+
+                # Trigger callback with offset range
+                # If callback fails, position is already updated (at-most-once delivery)
+                self.callback(file_path, last_position, current_size)
 
             except Exception as e:
                 self.logger.error(f"Error processing file modification {file_path}: {e}")
@@ -292,14 +295,28 @@ class LogWatcher:
         return True
 
     def get_position(self, file_path: str) -> int:
-        """Get current byte offset for a file."""
-        return self.positions.get(os.path.abspath(file_path), 0)
+        """Get current byte offset for a file (thread-safe)."""
+        file_path = os.path.abspath(file_path)
+        lock = self.file_locks.get(file_path)
+        if lock:
+            with lock:
+                return self.positions.get(file_path, 0)
+        else:
+            # File not watched yet, return 0
+            return self.positions.get(file_path, 0)
 
     def set_position(self, file_path: str, offset: int):
-        """Manually set byte offset for a file."""
+        """Manually set byte offset for a file (thread-safe)."""
         file_path = os.path.abspath(file_path)
-        self.positions[file_path] = offset
-        self.logger.debug(f"Position updated: {file_path} -> {offset}")
+        lock = self.file_locks.get(file_path)
+        if lock:
+            with lock:
+                self.positions[file_path] = offset
+                self.logger.debug(f"Position updated: {file_path} -> {offset}")
+        else:
+            # File not watched yet, set position anyway
+            self.positions[file_path] = offset
+            self.logger.debug(f"Position updated (no lock): {file_path} -> {offset}")
 
     def get_all_positions(self) -> Dict[str, int]:
         """Get all file positions (for state persistence)."""

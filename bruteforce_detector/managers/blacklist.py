@@ -94,12 +94,17 @@ class BlacklistManager:
             self.logger.warning(f"SECURITY ALERT: Detected {len(new_ips_info)} new malicious IPs")
             self._update_blacklist_file(self.config.blacklist_ipv4_file, new_ips_info)
             self._log_new_ips(new_ips_info)
-            
-            # Sync with NFTables
-            self.logger.info("Synchronizing with NFTables...")
-            new_to_blacklist, new_to_nft = self.sync_from_nftables()
-            if new_to_blacklist > 0:
-                self.logger.info(f"SUCCESS: {new_to_blacklist} IPs imported from NFTables")
+
+            # Sync with NFTables (C3 fix: graceful degradation on error)
+            try:
+                self.logger.info("Synchronizing with NFTables...")
+                new_to_blacklist, new_to_nft = self.sync_from_nftables()
+                if new_to_blacklist > 0:
+                    self.logger.info(f"SUCCESS: {new_to_blacklist} IPs imported from NFTables")
+            except Exception as e:
+                self.logger.error(f"NFTables sync failed: {e}")
+                self.logger.warning("Continuing blacklist operation without NFTables sync")
+                # Blacklist is still updated in file/database, just not synced to firewall
     
     def add_manual_ip(self, ip_str: str, reason: str = "Manually added", 
                      search_logs: bool = True) -> bool:

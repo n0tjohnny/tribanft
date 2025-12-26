@@ -42,6 +42,19 @@ class BlacklistDatabase:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
+
+        # Check SQLite version for json_patch support (available in SQLite 3.38+)
+        conn = sqlite3.connect(self.db_path)
+        sqlite_version = conn.execute("SELECT sqlite_version()").fetchone()[0]
+        version_tuple = tuple(map(int, sqlite_version.split('.')))
+        self.has_json_patch = version_tuple >= (3, 38, 0)
+        conn.close()
+
+        if self.has_json_patch:
+            self.logger.debug(f"SQLite {sqlite_version}: json_patch available for metadata merge")
+        else:
+            self.logger.warning(f"SQLite {sqlite_version}: json_patch NOT available, using fallback merge")
+
         self._init_db()
 
     @contextmanager
@@ -101,9 +114,12 @@ class BlacklistDatabase:
     
     def bulk_add(self, ips_info: Dict[str, Dict]) -> int:
         """
-        Bulk add/update IPs with correct UPSERT logic.
+        Bulk add/update IPs using UPSERT for deadlock-free operation.
 
-        If IP exists: UPDATE only provided fields (preserves existing data)
+        Uses INSERT ... ON CONFLICT UPDATE to avoid row-by-row SELECT checks
+        that can cause deadlocks under concurrent load.
+
+        If IP exists: UPDATE with intelligent field merging
         If IP is new: INSERT complete record
 
         Converts datetime objects to ISO strings for SQLite storage.
@@ -122,13 +138,13 @@ class BlacklistDatabase:
         """
         max_retries = 5
         retry_delay = 0.1  # Start with 100ms
-        
+
         for attempt in range(max_retries):
             try:
                 added = 0
 
-                # Use timeout and IMMEDIATE transaction for write lock
-                with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                # Use longer timeout with IMMEDIATE transaction for write lock
+                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     with self._query_timer(f"bulk_add({len(ips_info)} IPs)"):
                         # Begin IMMEDIATE transaction to acquire write lock immediately
                         conn.execute("BEGIN IMMEDIATE")
@@ -137,18 +153,62 @@ class BlacklistDatabase:
                             try:
                                 ip = ipaddress.ip_address(ip_str)
 
-                                # Check if IP already exists
-                                existing = conn.execute(
-                                    "SELECT * FROM blacklist WHERE ip = ?",
-                                    (ip_str,)
-                                ).fetchone()
+                                # Prepare values
+                                geo = info.get('geolocation', {})
 
-                                if existing:
-                                    # UPDATE: update only provided fields
-                                    self._update_existing_ip(conn, ip_str, info, existing)
-                                else:
-                                    # INSERT: new complete IP record
-                                    self._insert_new_ip(conn, ip_str, ip, info)
+                                # Convert datetime objects to ISO strings
+                                first_seen = info.get('first_seen')
+                                last_seen = info.get('last_seen')
+                                date_added = info.get('date_added')
+
+                                first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else first_seen
+                                last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else last_seen
+                                added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
+
+                                # Prepare metadata with event_types
+                                metadata = info.get('metadata', {}).copy() if info.get('metadata') else {}
+                                if 'event_types' not in metadata and info.get('event_types'):
+                                    metadata['event_types'] = info['event_types']
+                                metadata_json = json.dumps(metadata)
+
+                                # UPSERT: Insert new or update existing
+                                # Uses ON CONFLICT to avoid SELECT-then-UPDATE deadlock
+                                conn.execute("""
+                                    INSERT INTO blacklist (
+                                        ip, ip_version, reason, confidence, event_count,
+                                        source, country, city, isp,
+                                        first_seen, last_seen, date_added, metadata
+                                    )
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    ON CONFLICT(ip) DO UPDATE SET
+                                        event_count = event_count + excluded.event_count,
+                                        last_seen = COALESCE(excluded.last_seen, last_seen),
+                                        reason = COALESCE(excluded.reason, reason),
+                                        confidence = COALESCE(excluded.confidence, confidence),
+                                        source = COALESCE(excluded.source, source),
+                                        country = COALESCE(excluded.country, country),
+                                        city = COALESCE(excluded.city, city),
+                                        isp = COALESCE(excluded.isp, isp),
+                                        metadata = CASE
+                                            WHEN ? THEN json_patch(metadata, excluded.metadata)
+                                            ELSE excluded.metadata
+                                        END
+                                """, (
+                                    ip_str,
+                                    ip.version,
+                                    info.get('reason'),
+                                    info.get('confidence'),
+                                    info.get('event_count', 1),
+                                    info.get('source'),
+                                    geo.get('country') if geo else None,
+                                    geo.get('city') if geo else None,
+                                    geo.get('isp') if geo else None,
+                                    first_str,
+                                    last_str,
+                                    added_str,
+                                    metadata_json,
+                                    1 if self.has_json_patch else 0  # Boolean for CASE statement
+                                ))
 
                                 added += 1
 
@@ -157,20 +217,19 @@ class BlacklistDatabase:
                                 continue
 
                         conn.commit()
-                
+
                 # Success - return result
                 return added
-                
+
             except sqlite3.OperationalError as e:
                 error_msg = str(e).lower()
-                
-                # Check if it's a lock-related error (more robust error detection)
-                # Check both the error message string and errno if available
+
+                # Check if it's a lock-related error
                 is_lock_error = (
                     "database is locked" in error_msg or
                     "locked" in error_msg
                 )
-                
+
                 if is_lock_error and attempt < max_retries - 1:
                     self.logger.warning(
                         f"Database locked on attempt {attempt + 1}/{max_retries}, "
@@ -183,157 +242,10 @@ class BlacklistDatabase:
                     # Non-lock error or max retries exceeded
                     self.logger.error(f"ERROR: Database operation failed: {e}")
                     raise
-        
+
         # Should not reach here, but just in case
         raise sqlite3.OperationalError("Failed to complete bulk_add after all retries")
-    
-    def _update_existing_ip(self, conn, ip_str: str, new_info: Dict, existing_row):
-        """
-        Update only provided fields, preserves existing data.
 
-        Args:
-            conn: SQLite connection
-            ip_str: IP address string
-            new_info: New data to merge
-            existing_row: Existing database row
-        """
-        # Parse existing data
-        (_, ip_version, reason, confidence, event_count, source,
-         country, city, isp, first_seen, last_seen, date_added, metadata_json) = existing_row
-
-        # Merge geolocation (priority: new_info if provided, ALWAYS preserves existing)
-        # CRITICAL: Only update geo if new data provides non-empty values
-        # This prevents enrichment updates from accidentally clearing geolocation
-        geo = new_info.get('geolocation')
-        if geo and isinstance(geo, dict):
-            # Only update individual fields if new value is non-empty
-            new_country = geo.get('country')
-            new_city = geo.get('city')
-            new_isp = geo.get('isp')
-
-            # Preserve existing values unless new data provides better info
-            if new_country and not country:
-                self.logger.debug(f"Adding geo for {ip_str}: {new_country}")
-                country = new_country
-            elif new_country and new_country != country:
-                self.logger.debug(f"Updating geo for {ip_str}: {country} → {new_country}")
-                country = new_country
-
-            city = new_city if new_city else city
-            isp = new_isp if new_isp else isp
-        # If geo is None or not provided, existing values remain unchanged
-
-        # Merge other fields (priority: new_info if provided and not None)
-        if new_info.get('reason'):
-            reason = new_info.get('reason')
-        if new_info.get('confidence'):
-            confidence = new_info.get('confidence')
-        if new_info.get('event_count') is not None:
-            event_count = new_info.get('event_count')
-        if new_info.get('source'):
-            source = new_info.get('source')
-
-        # Timestamps: keep original first_seen, update last_seen if provided
-        first_seen_new = new_info.get('first_seen')
-        last_seen_new = new_info.get('last_seen')
-
-        # Keep original first_seen (don't overwrite)
-        first_str = first_seen
-
-        # Update last_seen only if provided
-        if last_seen_new:
-            last_str = last_seen_new.isoformat() if hasattr(last_seen_new, 'isoformat') else last_seen_new
-        else:
-            last_str = last_seen
-
-        # Metadata: merge JSON
-        try:
-            existing_metadata = json.loads(metadata_json) if metadata_json else {}
-        except (json.JSONDecodeError, TypeError):
-            existing_metadata = {}
-
-        new_metadata = new_info.get('metadata', {})
-
-        # Add event_types if provided and doesn't exist
-        if 'event_types' not in existing_metadata and new_info.get('event_types'):
-            new_metadata['event_types'] = new_info['event_types']
-        
-        merged_metadata = {**existing_metadata, **new_metadata}
-        
-        # UPDATE query
-        conn.execute("""
-            UPDATE blacklist SET
-                reason = ?,
-                confidence = ?,
-                event_count = ?,
-                source = ?,
-                country = ?,
-                city = ?,
-                isp = ?,
-                last_seen = ?,
-                metadata = ?
-            WHERE ip = ?
-        """, (
-            reason,
-            confidence,
-            event_count,
-            source,
-            country,
-            city,
-            isp,
-            last_str,
-            json.dumps(merged_metadata),
-            ip_str
-        ))
-    
-    def _insert_new_ip(self, conn, ip_str: str, ip, info: Dict):
-        """
-        Insert new complete IP record.
-
-        Args:
-            conn: SQLite connection
-            ip_str: IP address string
-            ip: IP address object
-            info: Complete IP metadata
-        """
-        geo = info.get('geolocation', {})
-        
-        # Convert datetime objects to ISO strings for SQLite
-        first_seen = info.get('first_seen')
-        last_seen = info.get('last_seen')
-        date_added = info.get('date_added')
-        
-        first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else None
-        last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else None
-        added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
-        
-        # Prepare metadata with event_types
-        metadata = info.get('metadata', {}).copy() if info.get('metadata') else {}
-        
-        # Add event_types to metadata if not already present
-        if 'event_types' not in metadata and info.get('event_types'):
-            metadata['event_types'] = info['event_types']
-        
-        # Insert or replace IP entry
-        conn.execute("""
-            INSERT INTO blacklist VALUES 
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            ip_str,
-            ip.version,
-            info.get('reason'),
-            info.get('confidence'),
-            info.get('event_count', 0),
-            info.get('source'),
-            geo.get('country') if geo else None,
-            geo.get('city') if geo else None,
-            geo.get('isp') if geo else None,
-            first_str,
-            last_str,
-            added_str,
-            json.dumps(metadata)
-        ))
-    
     def get_all_ips(self, ip_version: Optional[int] = None) -> Dict[str, Dict]:
         """
         Retrieve all IPs from database with full metadata.
