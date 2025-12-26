@@ -158,9 +158,12 @@ class BlacklistManager:
 
         Process:
         1. Validate IP address format
-        2. Remove from database/files
-        3. Remove from NFTables (if sync enabled)
+        2. Remove from database/files (atomic)
+        3. Remove from NFTables (if sync enabled, atomic with step 2)
         4. Log removal
+
+        THREAD SAFETY: Uses _update_lock for atomic read-modify-write operations.
+        Prevents race conditions during concurrent IP removal.
 
         Args:
             ip_str: IP address to remove
@@ -171,25 +174,28 @@ class BlacklistManager:
         try:
             ip = ipaddress.ip_address(ip_str)
 
-            # Remove from storage (database + files)
-            success = self.writer.remove_ip(ip_str)
+            # RACE CONDITION FIX: Acquire lock for atomic removal
+            # Entire operation (file + NFTables) under lock for complete atomicity
+            with self._update_lock:
+                # Remove from storage (database + files)
+                success = self.writer.remove_ip(ip_str)
 
-            if success:
-                # Remove from NFTables if sync enabled
-                if self.config.enable_nftables_update:
-                    try:
-                        from ..utils.nftables_sync import NFTablesSync
-                        nft = NFTablesSync(self.config)
-                        nft.remove_ip_from_set(ip_str)
-                        self.logger.info(f"Removed {ip_str} from NFTables")
-                    except Exception as e:
-                        self.logger.warning(f"Could not remove {ip_str} from NFTables: {e}")
+                if success:
+                    # Remove from NFTables if sync enabled
+                    if self.config.enable_nftables_update:
+                        try:
+                            from ..utils.nftables_sync import NFTablesSync
+                            nft = NFTablesSync(self.config)
+                            nft.remove_ip_from_set(ip_str)
+                            self.logger.info(f"Removed {ip_str} from NFTables")
+                        except Exception as e:
+                            self.logger.warning(f"Could not remove {ip_str} from NFTables: {e}")
 
-                self.logger.info(f"Successfully removed {ip_str} from blacklist")
-                return True
-            else:
-                self.logger.warning(f"IP {ip_str} was not in blacklist")
-                return False
+                    self.logger.info(f"Successfully removed {ip_str} from blacklist")
+                    return True
+                else:
+                    self.logger.warning(f"IP {ip_str} was not in blacklist")
+                    return False
 
         except ValueError:
             self.logger.error(f"ERROR: Invalid IP address: {ip_str}")
