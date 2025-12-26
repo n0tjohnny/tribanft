@@ -89,19 +89,6 @@ All 5 security invariants verified maintained or improved:
   - install_package() function added
   - main() updated to call install_package()
 
-### Testing Performed
-
-**Security Testing:**
-- Verified no AttributeError when calling BlacklistManager.remove_ip()
-- Tested concurrent IP removal operations (thread-safe)
-- Verified all 5 security invariants maintained
-- Confirmed lock pattern consistent across codebase
-
-**Installation Testing:**
-- Verified entry point created at ~/.local/bin/tribanft
-- Confirmed `tribanft --help` command works
-- Tested systemd service startup (no "No such file or directory" error)
-
 ---
 
 ## [2.5.8] - 2025-12-25
@@ -266,21 +253,6 @@ Comprehensive security audit of 27 issues across code, shell scripts, and docume
 - docs/RULE_SYNTAX.md
 - docs/PLUGIN_DEVELOPMENT.md
 - docs/API_REFERENCE.md
-
-### Testing Recommendations
-
-**Security Testing**:
-- Concurrent blacklist update stress tests
-- Database crash simulation during bulk inserts
-- Malicious regex pattern testing
-- Log flood backpressure testing
-- Log rotation file handle testing
-
-**Shell Script Testing**:
-- Installation with paths containing spaces
-- Validation failure scenarios
-- Backup and restore procedures
-- Non-root installation testing
 
 ---
 
