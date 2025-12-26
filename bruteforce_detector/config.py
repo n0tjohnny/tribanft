@@ -686,9 +686,23 @@ def get_config() -> DetectorConfig:
 
     Ensures configuration is loaded once and shared across modules.
     Automatically creates required directories on first access.
+
+    Auto-syncs new template options before loading configuration,
+    ensuring users receive new features while preserving their settings.
     """
     global _config_instance
     if _config_instance is None:
+        # AUTO-SYNC: Merge new template options before loading
+        # This ensures users automatically receive new configuration options
+        # from template updates without losing their customized settings
+        try:
+            from .config_sync import auto_sync_on_startup
+            auto_sync_on_startup()
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Config auto-sync failed: {e}")
+            logging.getLogger(__name__).info("Continuing with existing config")
+
+        # Load configuration
         _config_instance = DetectorConfig()
         try:
             _config_instance.ensure_directories()
