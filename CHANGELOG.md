@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.7.0] - 2025-12-26
+
+### Added
+
+#### NFTables Auto-Discovery in Real-Time Mode
+- **bruteforce_detector/core/realtime_engine.py:261-288** - Periodic NFTables auto-discovery in real-time daemon
+  - Runs NFTables auto-discovery every configurable interval (default: 3600s / 1 hour)
+  - Imports CrowdSec IPs and other NFTables sets while maintaining <2s attack detection speed
+  - Non-blocking: discovery errors do not crash real-time monitoring
+  - Checks `enable_nftables_update`, `nftables_auto_discovery`, and interval > 0 before running
+  - Calls `_enrich_metadata_from_sources()` for efficient metadata enrichment
+  - Impact: Automatic CrowdSec IP import without requiring manual `--detect` runs
+
+#### Configuration Options
+- **bruteforce_detector/config.py:350** - New `nftables_discovery_interval` property
+  - Type: int, default 3600 seconds (1 hour)
+  - Defines how often NFTables auto-discovery runs in real-time mode
+  - Set to 0 to disable periodic discovery
+  - Impact: User-configurable balance between freshness and overhead
+- **config.conf.template:339-344** - Documented `nftables_discovery_interval` option
+  - Added to `[realtime]` section with comprehensive documentation
+  - Explains purpose, behavior, and default value
+  - Config auto-sync ensures option added to existing installations
+  - Impact: Clear configuration guidance for users
+
+### Changed
+
+#### Real-Time Monitoring Enhancement
+- **bruteforce_detector/core/realtime_engine.py:232-289** - Enhanced `run_realtime()` method
+  - Added periodic NFTables discovery alongside existing state updates
+  - Uses same time-based interval pattern for consistency
+  - Maintains all existing functionality (log monitoring, state saves)
+  - Impact: Real-time mode now provides complete IP management (detection + import)
+
+### Fixed
+
+#### Real-Time Mode NFTables Import Gap
+- Real-time mode with watchdog now automatically imports CrowdSec IPs periodically
+- Previously: NFTables discovery only ran with `--detect` or periodic fallback mode
+- Users with watchdog installed get both: <2s attack detection AND automatic CrowdSec imports
+- Impact: Complete automation without manual intervention or separate cron jobs
+
+---
+
 ## [2.6.1] - 2025-12-26
 
 ### Added

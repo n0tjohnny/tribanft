@@ -336,6 +336,13 @@ rate_limit_backoff = 30
 # Default: 60 seconds (1 minute)
 fallback_interval = 60
 
+# NFTables Auto-Discovery Interval (seconds)
+# How often to run NFTables auto-discovery in real-time mode
+# This imports IPs from CrowdSec and other NFTables sets automatically
+# Set to 0 to disable periodic discovery in real-time mode
+# Default: 3600 seconds (1 hour)
+nftables_discovery_interval = 3600
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # [advanced] - Advanced Settings (Do Not Modify Unless You Know What You're Doing)

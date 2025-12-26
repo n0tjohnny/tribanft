@@ -347,6 +347,7 @@ class DetectorConfig(BaseSettings):
     max_events_per_second: int = 1000
     rate_limit_backoff: int = 30
     fallback_interval: int = 60
+    nftables_discovery_interval: int = 3600  # NFTables auto-discovery interval in real-time mode (seconds)
 
     # === NFTables Discovery (NEW in v2.4) ===
     nftables_event_log_enabled: bool = False

@@ -258,6 +258,8 @@ class RealtimeDetectionMixin:
             # Run until stop event is set
             last_state_update = time.time()
             state_update_interval = 60  # Save state every minute
+            last_nftables_discovery = time.time()
+            nftables_discovery_interval = self.config.nftables_discovery_interval
 
             # RACE CONDITION FIX: Use Event.wait() instead of while True + sleep
             # This allows immediate response to stop signal
@@ -271,6 +273,19 @@ class RealtimeDetectionMixin:
                         self.state_manager.update_state(state)
 
                     last_state_update = now
+
+                # Periodically run NFTables auto-discovery
+                if (self.config.enable_nftables_update and
+                    self.config.nftables_auto_discovery and
+                    nftables_discovery_interval > 0):
+                    if now - last_nftables_discovery >= nftables_discovery_interval:
+                        try:
+                            self.logger.info("Running periodic NFTables auto-discovery...")
+                            self._enrich_metadata_from_sources()
+                            last_nftables_discovery = now
+                        except Exception as e:
+                            self.logger.error(f"NFTables auto-discovery failed: {e}")
+                            # Don't crash real-time monitoring on discovery errors
 
         except KeyboardInterrupt:
             self.logger.info("Stopping real-time monitoring (Ctrl+C)...")
