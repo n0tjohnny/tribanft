@@ -1,6 +1,6 @@
 # TribanFT Deployment Guide
 
-Automated deployment for TribanFT v2.5.8
+Automated deployment for TribanFT v2.5.9
 
 ---
 
@@ -9,9 +9,9 @@ Automated deployment for TribanFT v2.5.8
 ```bash
 # On server
 cd ~
-wget https://github.com/n0tjohnny/tribanft/archive/v2.5.8.tar.gz
-tar -xzf v2.5.8.tar.gz
-cd tribanft-2.5.8
+wget https://github.com/n0tjohnny/tribanft/archive/v2.5.9.tar.gz
+tar -xzf v2.5.9.tar.gz
+cd tribanft-2.5.9
 ./install.sh
 ```
 

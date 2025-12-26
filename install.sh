@@ -1,6 +1,6 @@
 #!/bin/bash
 # TribanFT Automated Installation Script
-# Version: 2.4.1
+# Version: 2.5.9
 
 set -e
 
@@ -179,7 +179,7 @@ setup_systemd() {
 
 # Main installation
 main() {
-    echo_info "TribanFT Installation v2.4.1"
+    echo_info "TribanFT Installation v2.5.9"
     echo_info "=============================="
 
     check_python
