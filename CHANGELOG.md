@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.6.1] - 2025-12-26
+
+### Added
+
+#### Configuration Auto-Sync System
+- **bruteforce_detector/config_sync.py** - New configuration synchronization utility
+  - Automatically merges new options from config.conf.template to active config
+  - Preserves all user settings during sync
+  - Creates timestamped backups before modifications
+  - Supports multiple template locations: package, system, user install paths
+  - Graceful error handling with fallback to existing config
+  - Methods: `find_template_file()`, `sync_config()`, `auto_sync_on_startup()`
+  - Impact: Users automatically receive new configuration features without manual intervention
+
+#### Real-Time Service Diagnostic Tool
+- **tools/diagnose-realtime.py** - Comprehensive diagnostic utility for real-time monitoring
+  - Checks watchdog library availability
+  - Validates log file configuration and accessibility
+  - Verifies detector enabled flags
+  - Inspects rate limiting configuration
+  - Monitors systemd service status
+  - Analyzes application logs for common errors
+  - Provides actionable fix recommendations with exit codes
+  - Impact: Rapid troubleshooting of real-time service issues
+
+### Changed
+
+#### Configuration Loading
+- **bruteforce_detector/config.py:683-714** - Enhanced `get_config()` function
+  - Added automatic config sync call before loading configuration
+  - Imports and executes `auto_sync_on_startup()` on first config access
+  - Non-blocking error handling maintains backward compatibility
+  - Logs sync results at WARNING level for visibility
+  - Impact: Seamless template updates without service disruption
+
+#### Version Updates
+- **setup.py:35** - Updated version: `2.6.0` → `2.6.1`
+- **bruteforce_detector/__init__.py:2** - Updated version: `2.6.0` → `2.6.1`
+- **install.sh:3,182** - Updated version: `2.6.0` → `2.6.1`
+
+### Fixed
+
+#### Config Template Synchronization
+- Resolved issue where new configuration options from template updates were not propagating to existing installations
+- Users with configs from older versions (e.g., missing [threat_intelligence] section from v2.5) now receive updates automatically
+- Backup mechanism prevents data loss during sync operations
+- Impact: Ensures all users have access to latest features and configuration options
+
+#### Real-Time Service Diagnostics
+- Added systematic diagnostic capability to identify 6 potential failure points in real-time monitoring
+- Failure point detection: watchdog library, log files, parsers, rate limiting, service status, application errors
+- Improved troubleshooting workflow with clear status indicators and fix commands
+- Impact: Reduced time-to-resolution for real-time service issues
+
+### Documentation
+
+- Added comprehensive testing guide in implementation summary
+- Documented config sync behavior and rollback procedures
+- Included security invariant verification steps
+- Added diagnostic tool usage examples
+
+---
+
 ## [2.6.0] - 2025-12-26
 
 ### Security Release
