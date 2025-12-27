@@ -1,7 +1,5 @@
 # TribanFT Deployment Guide
 
-Automated deployment for TribanFT v2.5.9
-
 ---
 
 ## Installation
