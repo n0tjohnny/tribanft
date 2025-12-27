@@ -182,6 +182,7 @@ class BlacklistDatabase:
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     ON CONFLICT(ip) DO UPDATE SET
                                         event_count = event_count + excluded.event_count,
+                                        first_seen = MIN(excluded.first_seen, first_seen),
                                         last_seen = MAX(excluded.last_seen, last_seen),
                                         -- FIX #13: Preserve original detection metadata
                                         -- Use COALESCE(current, new) to keep original values
@@ -193,9 +194,13 @@ class BlacklistDatabase:
                                         city = COALESCE(city, excluded.city),
                                         isp = COALESCE(isp, excluded.isp),
                                         -- Merge metadata (accumulate attack information)
+                                        -- P1 FIX: Fallback for SQLite < 3.38 without json_patch()
                                         metadata = CASE
                                             WHEN ? THEN json_patch(metadata, excluded.metadata)
-                                            ELSE excluded.metadata
+                                            ELSE COALESCE(metadata, excluded.metadata)
+                                            -- NOTE: Without json_patch, keeps existing metadata
+                                            -- New metadata only used if none exists
+                                            -- For full merge on older SQLite, manual Python processing needed
                                         END
                                 """, (
                                     ip_str,

@@ -922,8 +922,13 @@ def main():
         success = engine.blacklist_manager.add_manual_ip(args.blacklist_add, reason, search_logs)
         sys.exit(0 if success else 1)
     elif args.blacklist_remove:
-        success = engine.blacklist_manager.remove_ip(args.blacklist_remove)
-        sys.exit(0 if success else 1)
+        try:
+            success = engine.blacklist_manager.remove_ip(args.blacklist_remove)
+            sys.exit(0 if success else 1)
+        except RuntimeError as e:
+            logger.error(f"Failed to remove IP: {e}")
+            logger.warning("Try disabling NFTables updates or fix firewall configuration")
+            sys.exit(1)
     elif args.blacklist_search:
         log_analysis = engine.blacklist_manager._search_logs_for_ip(args.blacklist_search)
         print(f"Log Analysis for {args.blacklist_search}:")

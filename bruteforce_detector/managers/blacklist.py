@@ -192,7 +192,7 @@ class BlacklistManager:
                 if self.config.enable_nftables_update:
                     try:
                         # Get all current IPs
-                        all_ips = self.blacklist_adapter.get_all_ips()
+                        all_ips = self.writer.get_all_ips()
 
                         # Create remaining IP sets (without the IP to remove)
                         remaining_ips = {x for x in all_ips if str(x) != ip_str}
@@ -213,7 +213,7 @@ class BlacklistManager:
                         raise RuntimeError(f"Cannot remove {ip_str}: NFTables update failed") from e
 
                 # Phase 2: Remove from storage (only if NFTables succeeded or disabled)
-                success = self.blacklist_adapter.remove_ip(ip_str)
+                success = self.writer.remove_ip(ip_str)
 
                 if success:
                     self.logger.info(f"Successfully removed {ip_str} from blacklist storage")

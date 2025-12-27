@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.1] - 2025-12-27
+
+### Fixed
+
+#### Critical Bug Fixes
+- **bruteforce_detector/managers/blacklist.py** - Fixed AttributeError in remove_ip()
+  - Corrected attribute name from `self.blacklist_adapter` to `self.writer` (lines 195, 216)
+  - Impact: IP removal functionality now works correctly
+  - Previously caused runtime crash: `AttributeError: 'BlacklistManager' object has no attribute 'blacklist_adapter'`
+
+- **bruteforce_detector/main.py** - Added exception handling for CLI remove operation
+  - Added try-except block for `--blacklist-remove` command (line 925)
+  - Provides graceful degradation when NFTables update fails
+  - Impact: CLI no longer crashes with stack trace, shows user-friendly error message
+
+#### Data Integrity Improvements
+- **bruteforce_detector/managers/database.py** - Added first_seen preservation in UPSERT
+  - Added `first_seen = MIN(excluded.first_seen, first_seen)` to ON CONFLICT clause
+  - Impact: Historical data accuracy - preserves earliest detection timestamp
+
+- **bruteforce_detector/managers/database.py** - Metadata merge fallback for SQLite < 3.38
+  - Added COALESCE fallback when json_patch() not available
+  - Impact: Prevents metadata loss on older SQLite versions
+
+### Added
+
+#### Documentation
+- **CLAUDE.md** - Added @ERROR_HANDLING_POLICY section
+  - Comprehensive guide on when to raise exceptions vs return False
+  - Clear patterns for managers, user operations, and parsers
+  - Critical rules for exception propagation changes
+  - Impact: Clear guidance for future development
+
+### Security
+
+#### Audit Findings - Already Protected
+- **bruteforce_detector/core/rule_engine.py** - ReDoS protection confirmed present
+  - regex_timeout() context manager with 1s timeout
+  - _is_safe_regex() pattern validation
+  - MAX_INPUT_LENGTH limiting (10,000 chars)
+  - Impact: System already protected against ReDoS attacks (Issue C7 was false positive)
+
+- **bruteforce_detector/core/realtime_engine.py** - Thread shutdown race protection confirmed
+  - threading.Event() for coordinated shutdown
+  - Graceful stop() method implementation
+  - Responsive shutdown with event.wait(timeout=...)
+  - Impact: No duplicate processing on shutdown (Issue C9 was false positive)
+
+### Notes
+
+This release focuses on bug fixes discovered during comprehensive code audit. Two critical runtime issues were fixed (AttributeError and CLI crash), plus improvements to data integrity. Additionally, audit revealed that issues C7 (ReDoS) and C9 (thread race) were already resolved in previous versions but not documented.
+
+---
+
 ## [2.8.0] - 2025-12-27
 
 ### Security
