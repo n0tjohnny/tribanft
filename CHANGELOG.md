@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.2] - 2025-12-27
+
+### Fixed
+
+#### Critical Import Missing
+- **bruteforce_detector/core/rule_engine.py** - Added missing threading import
+  - Added `import threading` to imports (line 22)
+  - Impact: Fixes NameError crash on engine initialization
+  - Previously caused: `NameError: name 'threading' is not defined`
+  - Discovered during production testing of v2.8.1
+
+### Notes
+
+Hotfix release to address critical import missing discovered in v2.8.1 testing. The threading.Lock() usage was present but the import statement was missing, causing immediate crash on startup.
+
+---
+
 ## [2.8.1] - 2025-12-27
 
 ### Fixed
