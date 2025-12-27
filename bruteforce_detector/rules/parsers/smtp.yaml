@@ -1,0 +1,90 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# SMTP Parser Pattern Definitions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Patterns for parsing SMTP/mail server logs (Postfix, Sendmail, Exim).
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-24
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: smtp
+  version: 1.0.0
+  author: TribanFT Project
+  description: SMTP server log parser patterns for authentication failures and abuse detection
+  log_format: smtp_log
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Groups
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ SMTP Attack Patterns                                                │
+  # └─────────────────────────────────────────────────────────────────────┘
+  smtp_attacks:
+    # Postfix authentication failures
+    - regex: 'SASL LOGIN authentication failed.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Postfix SASL auth failed'
+
+    - regex: 'authentication failure.*rhost=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Postfix authentication failure'
+
+    - regex: 'lost connection after AUTH from.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Postfix connection lost after auth'
+
+    - regex: 'warning:.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]: SASL.*authentication failed'
+      description: 'Postfix SASL warning'
+
+    # Sendmail patterns
+    - regex: 'AUTH=server.*failed.*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Sendmail auth failed'
+
+    - regex: 'ruleset=check_rcpt.*from=.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\].*reject'
+      description: 'Sendmail recipient check reject'
+
+    # Exim patterns
+    - regex: 'authenticator failed for.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Exim authenticator failed'
+
+    - regex: 'LOGIN.*authentication.*failed.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Exim LOGIN auth failed'
+
+    # Relay attempts (spam/abuse)
+    - regex: 'Relay access denied.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Relay attempt denied'
+
+    - regex: 'reject:.*Relay.*denied.*from.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Relay denied'
+
+    - regex: 'improper command pipelining.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Command pipelining abuse'
+
+    # Generic patterns
+    - regex: '(?i)authentication.*fail.*from.*?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Generic SMTP auth failure'
+
+    - regex: '(?i)sasl.*error.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Generic SASL error'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Postfix:
+#   Dec 23 10:15:42 mail postfix/smtpd[12345]: warning: unknown[1.2.3.4]: SASL LOGIN authentication failed
+#   Dec 23 10:15:43 mail postfix/smtpd[12346]: lost connection after AUTH from unknown[1.2.3.4]
+#   Dec 23 10:15:44 mail postfix/smtpd[12347]: NOQUEUE: reject: RCPT from unknown[1.2.3.4]: 554 5.7.1 Relay access denied
+#
+# Sendmail:
+#   Dec 23 10:15:42 mail sendmail[12345]: AUTH=server, relay=unknown [1.2.3.4], authid=test, mech=LOGIN, bits=0, failed
+#
+# Exim:
+#   2025-12-23 10:15:42 1sABCd-0000Ef-00 authenticator failed for (test) [1.2.3.4]: 535 Incorrect authentication data
+#   2025-12-23 10:15:43 1sABCd-0000Ef-01 H=(test) [1.2.3.4] F=<test@test.com> rejected RCPT <user@domain.com>: relay not permitted
+#
+# ═══════════════════════════════════════════════════════════════════════════

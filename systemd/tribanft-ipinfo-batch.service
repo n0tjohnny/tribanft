@@ -1,0 +1,46 @@
+[Unit]
+Description=TribanFT IP Geolocation Batch Service
+Documentation=https://github.com/n0tjohnny/tribanft
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# User and group are configurable via config.conf
+# Default: root (can be changed in config.conf [advanced] section)
+User=root
+Group=root
+
+# Use Python from config.conf (dynamically loaded)
+# Falls back to system Python if config.conf not found
+ExecStart=/bin/bash -c 'PYTHON_BIN=$(/usr/bin/python3 -c "from bruteforce_detector.config import get_config; print(get_config().python_bin)" 2>/dev/null || echo /usr/bin/python3); \
+PROJECT_DIR=$(/usr/bin/python3 -c "from bruteforce_detector.config import get_config; print(get_config().project_dir)" 2>/dev/null || echo /root/tribanft); \
+$PYTHON_BIN $PROJECT_DIR/tools/tribanft-ipinfo-batch.py --daemon'
+
+# Auto-restart on failure
+Restart=on-failure
+RestartSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tribanft-ipinfo-batch
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+# Timeouts
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Working directory is determined from config.conf
+WorkingDirectory=/tmp
+RuntimeDirectory=tribanft
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+include config.conf.template
+include README.md
+include LICENSE
+include CONFIGURATION.md
+recursive-include bruteforce_detector *.py
+recursive-include scripts *.sh
+recursive-include systemd *.service
+recursive-include tools *.py

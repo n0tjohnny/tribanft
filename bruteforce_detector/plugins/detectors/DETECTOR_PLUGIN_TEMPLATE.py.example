@@ -1,0 +1,215 @@
+"""
+Custom Detector Plugin Template
+
+Template for creating custom detector plugins for TribanFT.
+
+Usage:
+1. Copy this file to a new name (e.g., my_custom_detector.py)
+2. Update METADATA with your plugin information
+3. Implement the detect() method with your detection logic
+4. Place in bruteforce_detector/plugins/detectors/
+5. Restart TribanFT - plugin will be auto-discovered
+
+Author: TribanFT Project
+License: GNU GPL v3
+"""
+
+import ipaddress
+import logging
+from typing import List
+from collections import defaultdict
+from datetime import datetime, timedelta
+
+from ...detectors.base import BaseDetector
+from ...models import SecurityEvent, DetectionResult, EventType, DetectionConfidence
+
+
+class CustomDetectorTemplate(BaseDetector):
+    """
+    Custom detector template.
+
+    Replace this with your detector description.
+
+    Attributes:
+        threshold: Number of events required to trigger detection
+        time_window_minutes: Time window for event aggregation
+        custom_config: Example of loading custom config values
+    """
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PLUGIN METADATA - REQUIRED
+    # ═══════════════════════════════════════════════════════════════════════
+    METADATA = {
+        # Plugin identifier (lowercase, underscores)
+        'name': 'custom_detector_template',
+
+        # Semantic version
+        'version': '1.0.0',
+
+        # Author/maintainer
+        'author': 'Your Name',
+
+        # Brief description
+        'description': 'Template for custom detection logic',
+
+        # Required dependencies (injected by PluginManager)
+        'dependencies': ['config'],
+
+        # Enable by default?
+        'enabled_by_default': False,  # Set to True when ready
+
+        # Config section name (for per-plugin config)
+        'config_section': 'detector:custom_template'
+    }
+
+    def __init__(self, config):
+        """
+        Initialize custom detector.
+
+        Args:
+            config: Application configuration object
+        """
+        # Initialize base detector with event type
+        # Options: PRELOGIN_INVALID, FAILED_LOGIN, PORT_SCAN, CROWDSEC_BLOCK
+        super().__init__(config, EventType.FAILED_LOGIN)
+
+        self.logger = logging.getLogger(__name__)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # LOAD CONFIGURATION
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Load threshold from config (with fallback default)
+        self.threshold = getattr(config, 'custom_detector_threshold', 10)
+
+        # Load time window
+        self.time_window_minutes = getattr(
+            config, 'custom_detector_time_window', 60
+        )
+
+        # Example: Load custom config value
+        self.custom_config = getattr(config, 'custom_detector_option', 'default')
+
+        self.logger.info(
+            f"Initialized CustomDetector: "
+            f"threshold={self.threshold}, "
+            f"window={self.time_window_minutes}min"
+        )
+
+    def detect(self, events: List[SecurityEvent]) -> List[DetectionResult]:
+        """
+        Detect malicious activity from security events.
+
+        Implement your custom detection logic here.
+
+        Args:
+            events: List of SecurityEvent objects to analyze
+
+        Returns:
+            List of DetectionResult objects for detected threats
+        """
+        detections = []
+
+        # ═══════════════════════════════════════════════════════════════════
+        # STEP 1: FILTER RELEVANT EVENTS
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Filter events matching your criteria
+        relevant_events = [
+            event for event in events
+            if event.event_type == self.event_type
+        ]
+
+        if not relevant_events:
+            return detections
+
+        self.logger.debug(
+            f"Analyzing {len(relevant_events)} events for custom detection"
+        )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # STEP 2: GROUP EVENTS (typically by IP)
+        # ═══════════════════════════════════════════════════════════════════
+
+        events_by_ip = defaultdict(list)
+        for event in relevant_events:
+            events_by_ip[str(event.source_ip)].append(event)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # STEP 3: APPLY DETECTION LOGIC
+        # ═══════════════════════════════════════════════════════════════════
+
+        for ip_str, ip_events in events_by_ip.items():
+            # Example: Simple threshold-based detection
+            if len(ip_events) >= self.threshold:
+                # Create detection result
+                result = self._create_detection_result(
+                    ip_str=ip_str,
+                    reason=f"Custom detection: {len(ip_events)} suspicious events",
+                    confidence='high',  # 'high', 'medium', or 'low'
+                    event_count=len(ip_events),
+                    source_events=ip_events
+                )
+
+                if result:
+                    detections.append(result)
+                    self.logger.info(
+                        f"✓ Custom detection: {ip_str} "
+                        f"({len(ip_events)} events)"
+                    )
+
+        return detections
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # OPTIONAL: HELPER METHODS
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _matches_pattern(self, event: SecurityEvent) -> bool:
+        """
+        Example helper: Check if event matches custom pattern.
+
+        Args:
+            event: SecurityEvent to check
+
+        Returns:
+            True if event matches pattern, False otherwise
+        """
+        # Add your pattern matching logic here
+        # Example: regex on raw_message
+        import re
+        pattern = r'suspicious.*pattern'
+        return bool(re.search(pattern, event.raw_message, re.IGNORECASE))
+
+    def _calculate_confidence(self, event_count: int) -> str:
+        """
+        Example helper: Calculate confidence based on event count.
+
+        Args:
+            event_count: Number of events
+
+        Returns:
+            Confidence level ('high', 'medium', or 'low')
+        """
+        if event_count >= self.threshold * 2:
+            return 'high'
+        elif event_count >= self.threshold:
+            return 'medium'
+        else:
+            return 'low'
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIGURATION EXAMPLE
+# ═══════════════════════════════════════════════════════════════════════════
+"""
+Add to config.conf to customize this detector:
+
+[detector:custom_template]
+enabled = true
+threshold = 15
+time_window = 120
+custom_option = my_value
+
+Then enable the plugin by setting in config.conf:
+enable_custom_detector_template_plugin = true
+"""

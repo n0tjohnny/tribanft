@@ -1,0 +1,206 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# WordPress Attack Detection Rules
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Detects common WordPress attack patterns including:
+# - XML-RPC bruteforce
+# - wp-login.php bruteforce
+# - Plugin/theme vulnerability scanning
+# - Enumeration attacks
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-01-20
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Multiple detectors in single file
+detectors:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ WordPress Login Bruteforce                                          │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: wordpress_login_bruteforce
+      version: 1.0.0
+      description: Detects WordPress login bruteforce attacks
+      enabled: true
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - FAILED_LOGIN
+        - WORDPRESS_ATTACK
+
+      threshold: 15
+      time_window_minutes: 30
+      confidence: high
+
+      patterns:
+        - regex: "(?i)/wp-login\\.php"
+          description: "wp-login.php access"
+
+        - regex: "(?i)/wp-admin/"
+          description: "wp-admin access attempt"
+
+        - regex: "(?i)POST.*wp-login"
+          description: "wp-login POST attempt"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "WordPress login bruteforce: {event_count} attempts on {pattern_description}"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ XML-RPC Bruteforce                                                  │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: wordpress_xmlrpc_bruteforce
+      version: 1.0.0
+      description: Detects XML-RPC bruteforce attacks
+      enabled: true
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - WORDPRESS_ATTACK
+        - HTTP_REQUEST
+
+      # XML-RPC allows multicall, so fewer requests = more attempts
+      threshold: 5
+      time_window_minutes: 15
+      confidence: high
+
+      patterns:
+        - regex: "(?i).*POST.*/xmlrpc\\.php.*"
+          description: "XML-RPC POST request"
+
+        - regex: "(?i).*/xmlrpc\\.php.*system\\.multicall.*"
+          description: "XML-RPC multicall bruteforce"
+
+        - regex: "(?i).*/xmlrpc\\.php.*wp\\.getUsersBlogs.*"
+          description: "XML-RPC getUsersBlogs bruteforce"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "WordPress XML-RPC bruteforce: {event_count} requests ({pattern_description})"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Plugin/Theme Vulnerability Scanning                                 │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: wordpress_vulnerability_scan
+      version: 1.0.0
+      description: Detects WordPress plugin/theme vulnerability scanning
+      enabled: true
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - WORDPRESS_ATTACK
+        - HTTP_REQUEST
+
+      threshold: 10
+      time_window_minutes: 60
+      confidence: medium
+
+      patterns:
+        # Common vulnerable plugins
+        - regex: "(?i).*/wp-content/plugins/.*(timthumb|revslider|revolution).*"
+          description: "Vulnerable plugin scan (TimThumb/RevSlider)"
+
+        # Plugin enumeration
+        - regex: "(?i).*/wp-content/plugins/.*readme\\.txt.*"
+          description: "Plugin enumeration (readme.txt)"
+
+        # Theme enumeration
+        - regex: "(?i).*/wp-content/themes/.*style\\.css.*"
+          description: "Theme enumeration (style.css)"
+
+        # Direct access to PHP files in uploads
+        - regex: "(?i).*/wp-content/uploads/.*\\.php.*"
+          description: "Malicious file upload attempt"
+
+        # Backup file scanning
+        - regex: "(?i).*/wp-config\\.php\\.(bak|backup|old|~).*"
+          description: "wp-config backup file scan"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "WordPress vulnerability scan: {event_count} probes ({pattern_description})"
+
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ User Enumeration                                                    │
+  # └─────────────────────────────────────────────────────────────────────┘
+  - metadata:
+      name: wordpress_user_enumeration
+      version: 1.0.0
+      description: Detects WordPress user enumeration attempts
+      enabled: true
+
+    log_sources:
+      parsers:
+        - apache
+        - nginx
+
+    detection:
+      event_types:
+        - WORDPRESS_ATTACK
+        - HTTP_REQUEST
+
+      threshold: 8
+      time_window_minutes: 30
+      confidence: medium
+
+      patterns:
+        # REST API user enumeration
+        - regex: "(?i).*/wp-json/wp/v2/users.*"
+          description: "REST API user enumeration"
+
+        # Author archive enumeration
+        - regex: "(?i).*\\?author=\\d+.*"
+          description: "Author enumeration via author parameter"
+
+        # Login username enumeration
+        - regex: "(?i).*wp-login\\.php.*log=admin.*"
+          description: "Username validation via login page"
+
+    aggregation:
+      group_by: source_ip
+
+    output:
+      reason_template: "WordPress user enumeration: {event_count} attempts ({pattern_description})"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. Login bruteforce:
+#    1.2.3.4 - - [20/Jan/2025:14:30:00] "POST /wp-login.php" 401
+#
+# 2. XML-RPC attack:
+#    1.2.3.4 - - [20/Jan/2025:14:31:00] "POST /xmlrpc.php" 200 15234
+#
+# 3. Plugin scanning:
+#    1.2.3.4 - - [20/Jan/2025:14:32:00] "GET /wp-content/plugins/revslider/readme.txt" 200
+#
+# 4. User enumeration:
+#    1.2.3.4 - - [20/Jan/2025:14:33:00] "GET /?author=1" 200
+#
+# ═══════════════════════════════════════════════════════════════════════════

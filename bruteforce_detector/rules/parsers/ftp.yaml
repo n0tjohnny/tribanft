@@ -1,0 +1,77 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# FTP Parser Pattern Definitions
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Patterns for parsing FTP server logs (vsftpd, ProFTPD, Pure-FTPd).
+#
+# Author: TribanFT Project
+# License: GNU GPL v3
+# Last Updated: 2025-12-24
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+metadata:
+  name: ftp
+  version: 1.0.0
+  author: TribanFT Project
+  description: FTP server log parser patterns for failed login detection
+  log_format: ftp_log
+  enabled: true
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pattern Groups
+# ═══════════════════════════════════════════════════════════════════════════
+
+pattern_groups:
+  # ┌─────────────────────────────────────────────────────────────────────┐
+  # │ Failed Login Patterns                                               │
+  # └─────────────────────────────────────────────────────────────────────┘
+  failed_login:
+    # vsftpd patterns
+    - regex: 'FAIL LOGIN.*from.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'vsftpd failed login'
+
+    - regex: 'authentication failed.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'vsftpd authentication failure'
+
+    # ProFTPD patterns
+    - regex: 'no such user found.*from.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'ProFTPD unknown user'
+
+    - regex: 'USER.*\(Login failed\).*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'ProFTPD login failed'
+
+    - regex: 'Login incorrect.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'ProFTPD incorrect login'
+
+    # Pure-FTPd patterns
+    - regex: 'Authentication failed for user.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Pure-FTPd auth failed'
+
+    - regex: 'Sorry, but I can.t trust you.*\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]'
+      description: 'Pure-FTPd trust failure'
+
+    # Generic FTP patterns
+    - regex: '(?i)failed.*login.*from.*?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Generic FTP failed login'
+
+    - regex: '(?i)login.*failed.*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+      description: 'Generic login failure'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Example Log Lines
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# vsftpd:
+#   Mon Dec 23 10:15:42 2025 [pid 12345] FAIL LOGIN: Client "1.2.3.4"
+#   Mon Dec 23 10:15:43 2025 [pid 12346] [user] authentication failed from [1.2.3.4]
+#
+# ProFTPD:
+#   2025-12-23 10:15:42,123 mod_auth/0[12345]: USER admin (Login failed): No such user found from [1.2.3.4]
+#   2025-12-23 10:15:43,456 mod_auth/0[12346]: USER test (Login failed): Incorrect password from [1.2.3.4]
+#
+# Pure-FTPd:
+#   Dec 23 10:15:42 server pure-ftpd: (?@1.2.3.4) [WARNING] Authentication failed for user [admin]
+#   Dec 23 10:15:43 server pure-ftpd: (?@1.2.3.4) [ERROR] Sorry, but I can't trust you
+#
+# ═══════════════════════════════════════════════════════════════════════════
