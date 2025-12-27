@@ -32,7 +32,7 @@ class PostInstallCommand(install):
 
 setup(
     name="tribanft",
-    version="2.7.0",
+    version="2.8.0",
     packages=find_packages(),
     install_requires=[
         "pydantic",

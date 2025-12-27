@@ -108,6 +108,12 @@ result = DetectionResult(
 )
 ```
 
+**NEW in v2.8.0**: All timestamps are now timezone-aware (timezone.utc)
+- first_seen, last_seen use datetime.now(timezone.utc)
+- Detectors automatically create timezone-aware timestamps
+- Database and state files use timezone-aware timestamps
+- Prevents timezone confusion in distributed environments
+
 ---
 
 ## Base Classes

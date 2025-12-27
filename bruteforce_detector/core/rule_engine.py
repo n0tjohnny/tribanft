@@ -135,6 +135,9 @@ class RuleEngine:
         self._compiled_patterns: Dict[str, List[re.Pattern]] = {}
         self.validator = DetectorValidator()  # Detector configuration validator
 
+        # CRITICAL FIX #18: Thread-safe rule reloading
+        self._reload_lock = threading.Lock()
+
         self._load_rules()
 
     def _load_rules(self):
@@ -337,6 +340,9 @@ class RuleEngine:
         """
         Apply all loaded rules to events.
 
+        THREAD SAFETY FIX #18: Protected by lock to prevent reading rules
+        during reload operation.
+
         Args:
             events: List of SecurityEvent objects
 
@@ -345,18 +351,21 @@ class RuleEngine:
         """
         all_detections = []
 
-        for rule_name, rule in self.rules.items():
-            try:
-                rule_detections = self._apply_single_rule(rule, events)
-                all_detections.extend(rule_detections)
+        # CRITICAL FIX #18: Acquire lock to prevent race condition where
+        # reload_rules() clears rules dict while apply_rules() iterates it
+        with self._reload_lock:
+            for rule_name, rule in self.rules.items():
+                try:
+                    rule_detections = self._apply_single_rule(rule, events)
+                    all_detections.extend(rule_detections)
 
-                if rule_detections:
-                    self.logger.info(
-                        f"Rule '{rule_name}' found {len(rule_detections)} detections"
-                    )
+                    if rule_detections:
+                        self.logger.info(
+                            f"Rule '{rule_name}' found {len(rule_detections)} detections"
+                        )
 
-            except Exception as e:
-                self.logger.error(f"Error applying rule '{rule_name}': {e}", exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Error applying rule '{rule_name}': {e}", exc_info=True)
 
         return all_detections
 
@@ -600,12 +609,18 @@ class RuleEngine:
         Reload rules from disk.
 
         Useful for live updates without restarting service.
+
+        THREAD SAFETY FIX #18: Protected by lock to prevent race conditions
+        during concurrent reload and apply_rules operations.
         """
-        self.logger.info("Reloading detection rules...")
-        self.rules.clear()
-        self._compiled_patterns.clear()
-        self._load_rules()
-        self.logger.info(f"Reloaded {len(self.rules)} rules")
+        # CRITICAL FIX #18: Acquire lock to prevent race condition where
+        # apply_rules() reads rules dict while reload_rules() clears it
+        with self._reload_lock:
+            self.logger.info("Reloading detection rules...")
+            self.rules.clear()
+            self._compiled_patterns.clear()
+            self._load_rules()
+            self.logger.info(f"Reloaded {len(self.rules)} rules")
 
     def get_rule_summary(self) -> Dict[str, Any]:
         """

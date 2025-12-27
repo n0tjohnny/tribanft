@@ -169,7 +169,7 @@ monitor_mssql = true
 | enable_yaml_rules | `true` | Enable YAML-based detection rules |
 | rules_dir | `${project_dir}/rules` | YAML rules directory |
 
-See: docs/PLUGIN_DEVELOPMENT.md
+See: `docs/PLUGIN_DEVELOPMENT.md`
 
 ### [ipinfo] - IP Geolocation (Optional)
 
@@ -310,51 +310,236 @@ scripts/setup-config.sh --learning-mode
 
 ## Example Configurations
 
-### Minimal (Learning Mode)
+### Learning Mode (Week 1 - No Blocking)
+
+Complete configuration for initial deployment and tuning. Logging only, no firewall blocking.
+
 ```ini
-[features]
-enable_nftables_update = false
+[paths]
+data_dir = ~/.local/share/tribanft
+state_dir = ${data_dir}
+project_dir = ${data_dir}/bruteforce_detector
+
+[logs]
+syslog_path = /var/log/syslog
+mssql_errorlog_path = /var/opt/mssql/log/errorlog
 
 [storage]
 use_database = false
+sync_to_file = true
+blacklist_ipv4_path = ${paths:data_dir}/blacklist_ipv4.txt
+blacklist_ipv6_path = ${paths:data_dir}/blacklist_ipv6.txt
+
+[features]
+enable_prelogin_detection = true
+enable_failed_login_detection = true
+enable_port_scan_detection = true
+enable_nftables_update = false
+enable_crowdsec_integration = false
+enable_fail2ban_integration = false
+
+[detection]
+failed_login_threshold = 20
+time_window_minutes = 10080
 
 [realtime]
 monitor_syslog = true
+monitor_mssql = false
+monitor_apache = false
+monitor_nginx = false
+debounce_interval = 1.0
+
+[plugins]
+enable_plugin_system = true
+enable_yaml_rules = true
+
+[performance]
+backup_enabled = true
+backup_interval_days = 7
+
+[advanced]
+verbose = false
+log_level = INFO
 ```
 
-### Production (High Traffic)
+### Production (Active Blocking)
+
+Complete configuration for production deployment with NFTables integration.
+
 ```ini
-[features]
-enable_nftables_update = true
+[paths]
+data_dir = /var/lib/tribanft
+state_dir = ${data_dir}/state
+project_dir = ${data_dir}/bruteforce_detector
+
+[logs]
+syslog_path = /var/log/syslog
+mssql_errorlog_path = /var/opt/mssql/log/errorlog
+apache_access_log_path = /var/log/apache2/access.log
+nginx_access_log_path = /var/log/nginx/access.log
 
 [storage]
 use_database = true
-sync_to_file = false
+sync_to_file = true
+database_path = ${paths:data_dir}/blacklist.db
+blacklist_ipv4_path = ${paths:data_dir}/blacklist_ipv4.txt
+blacklist_ipv6_path = ${paths:data_dir}/blacklist_ipv6.txt
 
-[performance]
-batch_size = 2000
-backup_interval_days = 7
+[features]
+enable_prelogin_detection = true
+enable_failed_login_detection = true
+enable_port_scan_detection = true
+enable_nftables_update = true
+enable_crowdsec_integration = true
+enable_fail2ban_integration = true
 
-[realtime]
-monitor_syslog = true
-monitor_mssql = true
-```
+[nftables]
+nft_bin = /usr/sbin/nft
+blacklist_set = inet filter blacklist_ipv4
+blacklist_set_ipv6 = inet filter blacklist_ipv6
+port_scanners_set = inet filter port_scanners
+crowdsec_sets = inet filter crowdsec
+fail2ban_pattern = inet f2b-table addr-set-*
+nftables_auto_discovery = true
+nftables_event_log_enabled = false
 
-### Multi-Service Environment
-```ini
-[logs]
-apache_access_log_path = /var/log/apache2/access.log
-nginx_access_log_path = /var/log/nginx/access.log
+[detection]
+failed_login_threshold = 20
+brute_force_threshold = 15
+port_scan_threshold = 50
+time_window_minutes = 10080
+fail_on_detector_error = false
 
 [realtime]
 monitor_syslog = true
 monitor_mssql = true
 monitor_apache = true
 monitor_nginx = true
+debounce_interval = 1.0
+max_events_per_second = 1000
+rate_limit_backoff = 30
+fallback_interval = 60
+
+[plugins]
+enable_plugin_system = true
+enable_yaml_rules = true
+detector_plugin_dir = ${paths:project_dir}/plugins/detectors
+parser_plugin_dir = ${paths:project_dir}/plugins/parsers
+rules_dir = ${paths:project_dir}/rules
+
+[ipinfo]
+daily_limit = 2000
+rate_limit_per_minute = 100
+
+[whitelist]
+whitelist_path = ${paths:data_dir}/whitelist_ips.txt
+
+[performance]
+backup_enabled = true
+backup_interval_days = 7
+backup_retention_days = 30
+backup_min_keep = 4
+backup_compress_age_days = 1
+batch_size = 1000
+
+[threat_intelligence]
+threat_feeds_enabled = true
+threat_feed_sources = spamhaus
+threat_feed_cache_hours = 24
+
+[advanced]
+verbose = false
+log_level = INFO
+```
+
+### High-Performance (Large Scale)
+
+Optimized configuration for high-traffic environments (>10k IPs, multiple services).
+
+```ini
+[paths]
+data_dir = /var/lib/tribanft
+state_dir = ${data_dir}/state
+project_dir = ${data_dir}/bruteforce_detector
+
+[logs]
+syslog_path = /var/log/syslog
+mssql_errorlog_path = /var/opt/mssql/log/errorlog
+apache_access_log_path = /var/log/apache2/access.log
+nginx_access_log_path = /var/log/nginx/access.log
+dns_log_path = /var/log/named/query.log
+
+[storage]
+use_database = true
+sync_to_file = false
+database_path = ${paths:data_dir}/blacklist.db
 
 [features]
+enable_prelogin_detection = true
+enable_failed_login_detection = true
+enable_port_scan_detection = true
+enable_nftables_update = true
 enable_crowdsec_integration = true
 enable_fail2ban_integration = true
+
+[nftables]
+nft_bin = /usr/sbin/nft
+blacklist_set = inet filter blacklist_ipv4
+blacklist_set_ipv6 = inet filter blacklist_ipv6
+port_scanners_set = inet filter port_scanners
+crowdsec_sets = inet filter crowdsec
+fail2ban_pattern = inet f2b-table addr-set-*
+nftables_auto_discovery = true
+nftables_event_log_enabled = true
+batch_size = 2000
+
+[detection]
+failed_login_threshold = 15
+brute_force_threshold = 10
+port_scan_threshold = 30
+time_window_minutes = 10080
+fail_on_detector_error = false
+
+[realtime]
+monitor_syslog = true
+monitor_mssql = true
+monitor_apache = true
+monitor_nginx = true
+debounce_interval = 0.5
+max_events_per_second = 2000
+rate_limit_backoff = 30
+fallback_interval = 60
+
+[plugins]
+enable_plugin_system = true
+enable_yaml_rules = true
+detector_plugin_dir = ${paths:project_dir}/plugins/detectors
+parser_plugin_dir = ${paths:project_dir}/plugins/parsers
+rules_dir = ${paths:project_dir}/rules
+
+[ipinfo]
+daily_limit = 2000
+rate_limit_per_minute = 100
+
+[whitelist]
+whitelist_path = ${paths:data_dir}/whitelist_ips.txt
+
+[performance]
+backup_enabled = true
+backup_interval_days = 3
+backup_retention_days = 14
+backup_min_keep = 4
+backup_compress_age_days = 1
+batch_size = 2000
+
+[threat_intelligence]
+threat_feeds_enabled = true
+threat_feed_sources = spamhaus,abuseipdb,alienvault
+threat_feed_cache_hours = 12
+
+[advanced]
+verbose = false
+log_level = WARNING
 ```
 
 ---

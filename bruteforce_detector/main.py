@@ -26,6 +26,7 @@ import sys
 import os
 import argparse
 import logging
+import signal
 from typing import List
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -80,6 +81,9 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
         self.logger = logging.getLogger(__name__)
         self.config = get_config()
         self.geolocation_manager = IPGeolocationManager()
+
+        # CRITICAL FIX #35: Graceful shutdown flag for signal handlers
+        self._shutdown_requested = False
 
         try:
             # Initialize managers
@@ -168,9 +172,60 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
             # Initialize real-time monitoring (with automatic fallback)
             self._init_realtime()
 
+            # CRITICAL FIX #34: Setup signal handlers for hot-reload
+            self._setup_signal_handlers()
+
         except Exception as e:
             self.logger.error(f"Failed to initialize detector engine: {e}")
             raise
+
+    def _setup_signal_handlers(self):
+        """
+        Setup signal handlers for graceful operation and shutdown.
+
+        CRITICAL FIX #34: Allows reloading whitelist without service restart.
+        CRITICAL FIX #35: Graceful shutdown on SIGTERM/SIGINT.
+
+        Signals:
+            SIGHUP: Reload whitelist from disk
+            SIGTERM: Graceful shutdown
+            SIGINT: Graceful shutdown (Ctrl+C)
+        """
+        def handle_sighup(signum, frame):
+            """Handle SIGHUP signal by reloading whitelist."""
+            self.logger.info("Received SIGHUP signal - reloading whitelist...")
+            try:
+                self.whitelist_manager.reload()
+                self.logger.info("✓ Whitelist reloaded successfully")
+            except Exception as e:
+                self.logger.error(f"Failed to reload whitelist: {e}")
+
+        def handle_shutdown(signum, frame):
+            """Handle SIGTERM/SIGINT signal for graceful shutdown."""
+            sig_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+            self.logger.info(f"Received {sig_name} - initiating graceful shutdown...")
+            self._shutdown_requested = True
+
+            # Stop realtime monitoring if running
+            if hasattr(self, '_stop_event'):
+                self._stop_event.set()
+
+        # Register SIGHUP handler (Unix only)
+        if hasattr(signal, 'SIGHUP'):
+            signal.signal(signal.SIGHUP, handle_sighup)
+            self.logger.info("✓ SIGHUP signal handler registered (whitelist hot-reload)")
+        else:
+            self.logger.debug("SIGHUP not available on this platform (Windows)")
+
+        # Register SIGTERM handler (Unix/Windows)
+        if hasattr(signal, 'SIGTERM'):
+            signal.signal(signal.SIGTERM, handle_shutdown)
+            self.logger.info("✓ SIGTERM signal handler registered (graceful shutdown)")
+
+        # Register SIGINT handler (Ctrl+C - Unix/Windows)
+        if hasattr(signal, 'SIGINT'):
+            signal.signal(signal.SIGINT, handle_shutdown)
+            self.logger.info("✓ SIGINT signal handler registered (Ctrl+C shutdown)")
     
     def run_detection(self) -> List[DetectionResult]:
         """
@@ -207,7 +262,10 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
                 self.logger.error(f"Parser {parser.__class__.__name__} failed: {e}")
         
         # Run all detectors
+        # CRITICAL FIX #19: Track failed detectors for optional fail-fast mode
         all_detections: List[DetectionResult] = []
+        failed_detectors = []
+
         for detector in self.detectors:
             if not detector.enabled:
                 self.logger.info(f"Detector {detector.name} is disabled, skipping")
@@ -218,7 +276,19 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
                 all_detections.extend(detections)
                 self.logger.info(f"Detector {detector.name} found {len(detections)} detections")
             except Exception as e:
-                self.logger.error(f"Detector {detector.name} failed: {e}")
+                self.logger.error(f"Detector {detector.name} failed: {e}", exc_info=True)
+                failed_detectors.append(detector.name)
+
+        # CRITICAL FIX #19: Optional fail-fast on detector errors
+        if failed_detectors:
+            failure_msg = f"Detection completed with {len(failed_detectors)} failed detectors: {', '.join(failed_detectors)}"
+
+            # Check config for strict mode
+            if getattr(self.config, 'fail_on_detector_error', False):
+                self.logger.error(failure_msg)
+                raise RuntimeError(f"Critical detectors failed: {', '.join(failed_detectors)}")
+            else:
+                self.logger.warning(failure_msg)
 
         # Apply YAML rules
         if self.rule_engine:
@@ -295,12 +365,19 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
         
         # Update blacklists (handles logging internally)
         self.blacklist_manager.update_blacklists(unique_list)
-        
+
         # Update nftables if enabled
+        # FIX #4 FOLLOW-UP: Handle exceptions from NFTables update (Fix #4 added exception propagation)
+        # Storage is already updated, so graceful degradation on NFTables failure
         if self.config.enable_nftables_update:
-            self.nftables_manager.update_blacklists(
-                self.blacklist_manager.get_all_blacklisted_ips()
-            )
+            try:
+                self.nftables_manager.update_blacklists(
+                    self.blacklist_manager.get_all_blacklisted_ips()
+                )
+            except Exception as e:
+                self.logger.error(f"NFTables update failed after storage update: {e}")
+                self.logger.warning("Blacklist updated in storage but NOT synced to firewall - manual sync may be needed")
+                # Continue execution - storage is consistent, just not synced to firewall
 
     def _should_run_periodic_enrichment(self, state) -> bool:
         """
@@ -814,11 +891,17 @@ def main():
                 )
 
             # Update NFTables if enabled
+            # FIX #4 FOLLOW-UP: Handle exceptions from NFTables update (Fix #4 added exception propagation)
             if engine.config.enable_nftables_update:
                 logger.info("Updating NFTables firewall rules...")
                 all_ips = engine.blacklist_manager.get_all_blacklisted_ips()
-                engine.nftables_manager.update_blacklists(all_ips)
-                logger.info("SUCCESS: NFTables updated successfully")
+                try:
+                    engine.nftables_manager.update_blacklists(all_ips)
+                    logger.info("SUCCESS: NFTables updated successfully")
+                except Exception as e:
+                    logger.error(f"NFTables update failed after CrowdSec import: {e}")
+                    logger.warning("IPs imported to storage but NOT synced to firewall - run 'tribanft --sync-files' to retry")
+                    # Continue - import succeeded, just firewall sync failed
 
             logger.info(f"SUCCESS: Successfully imported {len(imported_data)} IPs from CrowdSec CSV")
         else:

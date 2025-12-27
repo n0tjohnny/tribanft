@@ -78,18 +78,21 @@ class BlacklistManager:
     def update_blacklists(self, detections: List[DetectionResult]):
         """
         Process new detections and update blacklist storage.
-        
+
         Workflow:
         1. Prepare detection data with metadata and timestamps
         2. Write to blacklist files/database
         3. Synchronize with NFTables firewall
         4. Import any new IPs found in NFTables
-        
+
+        NOTE: NFTables export is handled by caller (main.py) after this method returns.
+        This allows caller to batch multiple updates before exporting to firewall.
+
         Args:
             detections: List of DetectionResult objects from detectors
         """
         new_ips_info = self._prepare_detection_ips(detections)
-        
+
         if new_ips_info:
             self.logger.warning(f"SECURITY ALERT: Detected {len(new_ips_info)} new malicious IPs")
             self._update_blacklist_file(self.config.blacklist_ipv4_file, new_ips_info)
@@ -182,24 +185,41 @@ class BlacklistManager:
             # RACE CONDITION FIX: Acquire lock for atomic removal
             # Entire operation (file + NFTables) under lock for complete atomicity
             with self._update_lock:
-                # Remove from storage (database + files)
-                success = self.writer.remove_ip(ip_str)
+                # TWO-PHASE COMMIT: Remove from NFTables FIRST, then storage
+                # This prevents inconsistent state where IP is removed from storage
+                # but still blocked in firewall (Fix #9)
+
+                if self.config.enable_nftables_update:
+                    try:
+                        # Get all current IPs
+                        all_ips = self.blacklist_adapter.get_all_ips()
+
+                        # Create remaining IP sets (without the IP to remove)
+                        remaining_ips = {x for x in all_ips if str(x) != ip_str}
+
+                        # Full NFTables update without this IP
+                        # Use existing instance, not new one (Fix #10)
+                        ipv4_set = {x for x in remaining_ips if x.version == 4}
+                        ipv6_set = {x for x in remaining_ips if x.version == 6}
+
+                        self.nft_sync.update_blacklists({
+                            'ipv4': ipv4_set,
+                            'ipv6': ipv6_set
+                        })
+                        self.logger.info(f"Removed {ip_str} from NFTables")
+
+                    except Exception as e:
+                        self.logger.error(f"NFTables removal failed for {ip_str}: {e}")
+                        raise RuntimeError(f"Cannot remove {ip_str}: NFTables update failed") from e
+
+                # Phase 2: Remove from storage (only if NFTables succeeded or disabled)
+                success = self.blacklist_adapter.remove_ip(ip_str)
 
                 if success:
-                    # Remove from NFTables if sync enabled
-                    if self.config.enable_nftables_update:
-                        try:
-                            from ..utils.nftables_sync import NFTablesSync
-                            nft = NFTablesSync(self.config)
-                            nft.remove_ip_from_set(ip_str)
-                            self.logger.info(f"Removed {ip_str} from NFTables")
-                        except Exception as e:
-                            self.logger.warning(f"Could not remove {ip_str} from NFTables: {e}")
-
-                    self.logger.info(f"Successfully removed {ip_str} from blacklist")
+                    self.logger.info(f"Successfully removed {ip_str} from blacklist storage")
                     return True
                 else:
-                    self.logger.warning(f"IP {ip_str} was not in blacklist")
+                    self.logger.warning(f"IP {ip_str} was not in blacklist storage")
                     return False
 
         except ValueError:

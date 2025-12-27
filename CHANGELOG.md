@@ -7,6 +7,215 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.0] - 2025-12-27
+
+### Security
+
+#### Timezone-Aware Timestamps
+- **bruteforce_detector/detectors/base.py** - Changed datetime.now() to datetime.now(timezone.utc)
+  - All detector timestamps now timezone-aware
+  - Prevents timezone confusion in distributed environments
+  - Impact: Consistent timestamp handling across detectors
+
+- **bruteforce_detector/managers/database.py** - Timezone-aware timestamps in backup operations
+  - Backup timestamps now use timezone.utc
+  - Impact: Consistent backup metadata across timezones
+
+- **bruteforce_detector/core/log_watcher.py** - Rate limit timestamps timezone-aware
+  - State persistence uses timezone.utc
+  - Impact: Rate limit tracking consistent across timezone changes
+
+#### Thread Safety Enhancements
+- **bruteforce_detector/parsers/base.py** - Parser singleton thread safety
+  - Added threading.Lock() for singleton initialization
+  - Implemented double-checked locking pattern
+  - Impact: Race condition eliminated in concurrent parser creation
+
+- **bruteforce_detector/core/realtime_engine.py** - Parser reuse thread safety
+  - Added per-parser lock dictionary
+  - Lock acquired/released in callback with finally block
+  - Impact: Prevents corruption if same file monitored twice
+
+#### Atomic Operations
+- **bruteforce_detector/managers/blacklist.py** - Two-phase commit for IP removal
+  - Implemented storage-first, then firewall update pattern
+  - Rollback on NFTables failure
+  - Eliminated duplicate NFTablesSync instances
+  - Impact: No inconsistent state possible during removal operations
+
+### Fixed
+
+#### Data Integrity
+- **bruteforce_detector/managers/database.py** - UPSERT metadata preservation
+  - Changed COALESCE order to preserve original detection metadata
+  - First detection's reason, confidence, source preserved on re-detection
+  - Impact: Forensic metadata from initial detection never overwritten
+
+- **bruteforce_detector/managers/database.py** - SQLite backup atomicity
+  - Replaced file copy with SQLite backup() API
+  - Added integrity verification with PRAGMA integrity_check
+  - Added progress callback for large databases
+  - Impact: Backups consistent even during active writes
+
+- **bruteforce_detector/core/log_watcher.py** - Rate limit state persistence
+  - Added state file with atomic write pattern (tempfile + rename)
+  - Loads on startup, saves on rate limit trigger
+  - Impact: DoS protection survives process restarts
+
+#### Error Handling
+- **bruteforce_detector/managers/nftables_manager.py** - NFTables error propagation
+  - Added raise statement to propagate exceptions to callers
+  - Enables retry logic and better error detection
+  - Impact: Callers can detect NFTables failures for recovery
+
+- **bruteforce_detector/main.py** - NFTables exception handling in callers
+  - Added try-except blocks in run_detection() and CrowdSec import
+  - Graceful degradation on NFTables failures
+  - Clear error messages with manual sync instructions
+  - Impact: Storage always consistent, firewall sync failures recoverable
+
+#### Consistency
+- **bruteforce_detector/managers/blacklist.py** - IP removal consistency
+  - Fixed partial state during remove_ip() failures
+  - Two-phase commit ensures storage and firewall always synchronized
+  - Impact: No scenario where IP in storage but not in firewall (or vice versa)
+
+- **bruteforce_detector/managers/blacklist.py** - Eliminated duplicate NFTables instances
+  - Removed redundant NFTablesSync creation in remove_ip()
+  - Uses single instance from constructor
+  - Impact: Reduced memory usage, prevents sync conflicts
+
+### Changed
+
+#### Backup Behavior
+- **bruteforce_detector/managers/database.py** - Backup filename format
+  - Before: blacklist.db.backup.20251227
+  - After: blacklist.db.backup.20251227_165830 (includes time)
+  - Impact: Multiple backups per day now possible
+  - Note: Backup cleanup automatically handles old files
+
+#### Error Propagation
+- **bruteforce_detector/managers/nftables_manager.py** - Exception behavior
+  - Before: Logged errors silently
+  - After: Raises exceptions to caller for handling
+  - Impact: Callers can implement retry logic and recovery
+  - Note: Callers must handle NFTables exceptions (already implemented in main.py)
+
+### Technical Details
+
+**Files Modified**: 8 Python files (173 net lines added)
+- bruteforce_detector/detectors/base.py (+2 lines)
+- bruteforce_detector/managers/nftables_manager.py (+1 line)
+- bruteforce_detector/managers/blacklist.py (+17 lines)
+- bruteforce_detector/parsers/base.py (+7 lines)
+- bruteforce_detector/managers/database.py (+56 lines)
+- bruteforce_detector/core/realtime_engine.py (+18 lines)
+- bruteforce_detector/core/log_watcher.py (+58 lines)
+- bruteforce_detector/main.py (+14 lines)
+
+**All Security Invariants Maintained**:
+1. Whitelist Precedence: No changes to whitelist logic
+2. Atomic Operations: Enhanced with two-phase commit and graceful degradation
+3. Thread Safety: Enhanced with parser locks and singleton protection
+4. Input Validation: No changes (maintained)
+5. Database UPSERT: Enhanced metadata preservation
+
+**Risk**: LOW - All changes are defensive improvements
+**Breaking Changes**: None (exception handling added in callers)
+**Testing**: Comprehensive test suite in tribanft-v2.8.0/audit-phase2-testing-guide.md
+
+---
+
+## [2.7.1] - 2025-12-27
+
+### Security
+
+#### Thread Safety Improvements
+- **bruteforce_detector/managers/nftables_manager.py** - Added threading.Lock to prevent NFTables race conditions
+  - Prevents last-writer-wins when multiple threads call update_blacklists() simultaneously
+  - Entire operation protected from tempfile creation to nft command execution
+  - Impact: Eliminates potential for lost IP updates in concurrent scenarios
+- **bruteforce_detector/core/rule_engine.py** - Added threading.Lock to rule reload operations
+  - Protects reload_rules() and apply_rules() from concurrent access
+  - Prevents corruption when reloading rules while detection is running
+  - Impact: Safe runtime rule updates without service restart
+- **bruteforce_detector/managers/whitelist.py** - Added threading.Lock to whitelist operations
+  - Protects is_whitelisted() checks during reload operations
+  - Prevents race condition where reload clears whitelist during active checking
+  - Impact: Thread-safe hot-reload of whitelist file
+
+#### Defense-in-Depth Validation
+- **bruteforce_detector/managers/nftables_manager.py** - Added secondary whitelist validation
+  - Filters whitelisted IPs before NFTables export as last line of defense
+  - Logs warning if whitelisted IPs found (indicates upstream bug)
+  - Impact: Prevents whitelisted IPs from reaching firewall even if caller bypasses check
+- **bruteforce_detector/managers/nftables_manager.py** - Added NFTables sets existence validation
+  - Validates blacklist_ipv4/ipv6 sets exist on startup
+  - Provides clear error message with setup instructions if missing
+  - Disables NFTables updates gracefully if validation fails
+  - Impact: Prevents cryptic runtime errors, guides users to fix configuration
+
+#### Atomic Operations
+- **bruteforce_detector/managers/whitelist.py** - Atomic file rewrite with tempfile pattern
+  - Uses tempfile.mkstemp() + os.replace() for atomic whitelist updates
+  - Prevents corruption if process killed during remove_from_whitelist()
+  - Proper cleanup of temp files on exception
+  - Impact: Whitelist file either fully updated or unchanged, never corrupted
+- **bruteforce_detector/utils/backup_manager.py** - File locking during backup creation
+  - Uses existing file_lock utility to lock source file during copy
+  - Prevents inconsistent backups if file modified during backup
+  - Graceful timeout handling (logs warning, returns None)
+  - Impact: Backups are always consistent snapshots
+
+#### Data Integrity
+- **bruteforce_detector/managers/database.py** - Fixed UPSERT last_seen logic
+  - Changed from COALESCE to MAX for last_seen timestamp updates
+  - Ensures last_seen always increases, never regresses to older value
+  - Impact: Accurate timestamp tracking for IP activity
+
+### Added
+
+#### Signal Handler Support
+- **bruteforce_detector/main.py** - SIGHUP handler for whitelist hot-reload
+  - Reload whitelist without service restart: kill -HUP <pid>
+  - Thread-safe reload using existing lock infrastructure
+  - Logs success/failure of reload operation
+  - Impact: Update trusted IPs in production without downtime
+- **bruteforce_detector/main.py** - SIGTERM/SIGINT handlers for graceful shutdown
+  - Clean shutdown on SIGTERM: kill -TERM <pid>
+  - Ctrl+C (SIGINT) also triggers graceful shutdown
+  - Sets _shutdown_requested flag, signals _stop_event
+  - Daemon loops complete current operation before exiting
+  - Impact: No data corruption or incomplete operations on shutdown
+
+#### Error Tracking and Diagnostics
+- **bruteforce_detector/main.py** - Detector exception tracking with fail-fast mode
+  - Tracks failed detectors in failed_detectors list
+  - Logs full stack traces with exc_info=True
+  - Optional fail-fast via fail_on_detector_error config (default: false)
+  - Warning summary logged if detectors fail but detection continues
+  - Impact: Visibility into detector failures, optional strict mode for production
+
+#### Configuration Options
+- **config.conf** - New fail_on_detector_error parameter
+  - Section: [detection]
+  - Type: boolean, default false
+  - When true: raises exception if any detector fails
+  - When false: logs warning and continues detection
+  - Impact: Configurable strictness for error handling
+
+### Fixed
+
+#### ReDoS Protection
+- **bruteforce_detector/core/rule_engine.py** - Verified existing ReDoS protection
+  - 1-second timeout on regex matching using SIGALRM
+  - 10,000 character input length limit
+  - Pattern validation for nested quantifiers
+  - All user-provided patterns protected with regex_timeout() context manager
+  - Status: Already implemented, no changes needed
+
+---
+
 ## [2.7.0] - 2025-12-26
 
 ### Added

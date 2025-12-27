@@ -21,7 +21,7 @@ License: GNU GPL v3
 import sqlite3
 from typing import Dict, Optional
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import ipaddress
@@ -163,7 +163,7 @@ class BlacklistDatabase:
 
                                 first_str = first_seen.isoformat() if hasattr(first_seen, 'isoformat') else first_seen
                                 last_str = last_seen.isoformat() if hasattr(last_seen, 'isoformat') else last_seen
-                                added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now().isoformat()
+                                added_str = date_added.isoformat() if hasattr(date_added, 'isoformat') else datetime.now(timezone.utc).isoformat()
 
                                 # Prepare metadata with event_types
                                 metadata = info.get('metadata', {}).copy() if info.get('metadata') else {}
@@ -182,13 +182,17 @@ class BlacklistDatabase:
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     ON CONFLICT(ip) DO UPDATE SET
                                         event_count = event_count + excluded.event_count,
-                                        last_seen = COALESCE(excluded.last_seen, last_seen),
-                                        reason = COALESCE(excluded.reason, reason),
-                                        confidence = COALESCE(excluded.confidence, confidence),
-                                        source = COALESCE(excluded.source, source),
-                                        country = COALESCE(excluded.country, country),
-                                        city = COALESCE(excluded.city, city),
-                                        isp = COALESCE(excluded.isp, isp),
+                                        last_seen = MAX(excluded.last_seen, last_seen),
+                                        -- FIX #13: Preserve original detection metadata
+                                        -- Use COALESCE(current, new) to keep original values
+                                        reason = COALESCE(reason, excluded.reason),
+                                        confidence = COALESCE(confidence, excluded.confidence),
+                                        source = COALESCE(source, excluded.source),
+                                        -- Enrich geolocation if missing (keep current, use new only if NULL)
+                                        country = COALESCE(country, excluded.country),
+                                        city = COALESCE(city, excluded.city),
+                                        isp = COALESCE(isp, excluded.isp),
+                                        -- Merge metadata (accumulate attack information)
                                         metadata = CASE
                                             WHEN ? THEN json_patch(metadata, excluded.metadata)
                                             ELSE excluded.metadata
@@ -554,15 +558,55 @@ class BlacklistDatabase:
         return ips
 
     def backup(self):
-        """Create daily database backup."""
-        backup_path = Path(str(self.db_path) + f".backup.{datetime.now().strftime('%Y%m%d')}")
+        """
+        Create consistent database backup using SQLite backup API.
+
+        FIX #14: Uses SQLite's backup() method instead of shutil.copy2()
+        for atomic, consistent backups that don't block writers.
+
+        Also includes integrity verification of the backup.
+        """
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        backup_path = Path(str(self.db_path) + f".backup.{timestamp}")
 
         try:
-            import shutil
-            shutil.copy2(self.db_path, backup_path)
+            # Use SQLite's backup API for consistent snapshots (Fix #14)
+            # This doesn't block writers and ensures consistent state
+            with sqlite3.connect(self.db_path, timeout=30.0) as source:
+                with sqlite3.connect(backup_path, timeout=30.0) as dest:
+                    # Atomic backup with progress callback
+                    source.backup(dest, pages=100, progress=self._backup_progress)
+
             self.logger.info(f"Database backup created: {backup_path.name}")
+
+            # Verify backup integrity
+            try:
+                with sqlite3.connect(backup_path, timeout=10.0) as conn:
+                    result = conn.execute("PRAGMA integrity_check").fetchone()
+                    if result[0] != 'ok':
+                        self.logger.error(f"Backup integrity check failed: {result[0]}")
+                        backup_path.unlink()  # Delete corrupted backup
+                        return None
+                    else:
+                        self.logger.debug(f"Backup integrity verified: {backup_path.name}")
+            except Exception as e:
+                self.logger.warning(f"Could not verify backup integrity: {e}")
+
+            return backup_path
+
         except Exception as e:
             self.logger.error(f"Backup failed: {e}")
+            if backup_path.exists():
+                try:
+                    backup_path.unlink()  # Cleanup failed backup
+                except Exception:
+                    pass
+            return None
+
+    def _backup_progress(self, status, remaining, total):
+        """Progress callback for SQLite backup operation."""
+        if remaining == 0:
+            self.logger.debug(f"Backup progress: {total} pages completed")
 
     def delete_ip(self, ip_str: str) -> bool:
         """

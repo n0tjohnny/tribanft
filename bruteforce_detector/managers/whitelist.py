@@ -20,6 +20,9 @@ from typing import Set, List, Optional
 import ipaddress
 from pathlib import Path
 import logging
+import threading
+import tempfile
+import os
 from datetime import datetime
 
 from ..config import get_config
@@ -27,8 +30,8 @@ from ..utils.validators import validate_ip, validate_cidr
 
 
 class WhitelistManager:
-    """Manages whitelisted IPs and networks"""
-    
+    """Manages whitelisted IPs and networks with hot-reload support"""
+
     def __init__(self):
         """Initialize whitelist manager and load entries from file."""
         self.individual_ips: Set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
@@ -36,6 +39,10 @@ class WhitelistManager:
         self.last_loaded: Optional[datetime] = None
         self.logger = logging.getLogger(__name__)
         self.config = get_config()
+
+        # CRITICAL FIX #34: Thread-safe whitelist reloading
+        self._reload_lock = threading.Lock()
+
         self._load_whitelist()
     
     def _load_whitelist(self):
@@ -98,23 +105,28 @@ class WhitelistManager:
     def is_whitelisted(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         """
         Check if IP is whitelisted.
-        
+
+        THREAD SAFETY FIX #34: Protected by lock to prevent reading during reload.
+
         Args:
             ip: IP address object to check
-            
+
         Returns:
             True if IP is in whitelist or belongs to whitelisted network
         """
-        # Check individual IPs (faster)
-        if ip in self.individual_ips:
-            return True
-        
-        # Check networks
-        for network in self.networks:
-            if ip in network:
+        # CRITICAL FIX #34: Acquire lock to prevent race condition where
+        # reload() clears whitelist while is_whitelisted() checks it
+        with self._reload_lock:
+            # Check individual IPs (faster)
+            if ip in self.individual_ips:
                 return True
-        
-        return False
+
+            # Check networks
+            for network in self.networks:
+                if ip in network:
+                    return True
+
+            return False
     
     def add_to_whitelist(self, ip_or_network: str) -> bool:
         """
@@ -175,15 +187,32 @@ class WhitelistManager:
                     removed = True
             
             if removed:
-                # Rewrite file
-                with open(self.config.whitelist_file, 'w') as f:
-                    f.write("# IP Whitelist\n\n")
-                    for ip in sorted(self.individual_ips):
-                        f.write(f"{ip}\n")
-                    for network in sorted(self.networks):
-                        f.write(f"{network}\n")
-                
-                self.logger.info(f"Removed {ip_or_network} from whitelist")
+                # CRITICAL FIX #31: Atomic file rewrite using tempfile + rename
+                # Prevents corruption if process killed during write
+                whitelist_file = Path(self.config.whitelist_file)
+                fd, temp_path = tempfile.mkstemp(
+                    dir=whitelist_file.parent,
+                    prefix=".whitelist.",
+                    suffix=".tmp"
+                )
+
+                try:
+                    with os.fdopen(fd, 'w') as f:
+                        f.write("# IP Whitelist\n\n")
+                        for ip in sorted(self.individual_ips):
+                            f.write(f"{ip}\n")
+                        for network in sorted(self.networks):
+                            f.write(f"{network}\n")
+
+                    # Atomic rename (all-or-nothing semantics)
+                    os.replace(temp_path, self.config.whitelist_file)
+                    self.logger.info(f"Removed {ip_or_network} from whitelist")
+
+                except Exception as e:
+                    # Clean up temp file on error
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                    raise
             
             return removed
             
@@ -196,3 +225,32 @@ class WhitelistManager:
         entries = [str(ip) for ip in sorted(self.individual_ips)]
         entries.extend(str(network) for network in sorted(self.networks))
         return entries
+
+    def reload(self):
+        """
+        Hot-reload whitelist from disk.
+
+        CRITICAL FIX #34: Allows updating whitelist without restarting service.
+        Triggered by SIGHUP signal handler.
+
+        Thread-safe: Uses lock to prevent race conditions with is_whitelisted() checks.
+
+        Use case:
+            1. Edit whitelist_ips.txt to add/remove trusted IPs
+            2. Send SIGHUP signal: kill -HUP <pid>
+            3. Whitelist reloads without service restart
+        """
+        with self._reload_lock:
+            self.logger.info("Reloading whitelist from disk...")
+
+            # Clear current whitelist
+            self.individual_ips.clear()
+            self.networks.clear()
+
+            # Reload from file
+            self._load_whitelist()
+
+            self.logger.info(
+                f"Whitelist reloaded: {len(self.individual_ips)} IPs, "
+                f"{len(self.networks)} networks"
+            )

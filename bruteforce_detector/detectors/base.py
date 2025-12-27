@@ -18,7 +18,7 @@ License: GNU GPL v3
 import ipaddress
 import logging
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from abc import ABC, abstractmethod
 
 from ..models import DetectionResult, SecurityEvent, EventType, DetectionConfidence
@@ -121,8 +121,8 @@ class BaseDetector(ABC):
                     if not final_last_seen:
                         final_last_seen = max(timestamps)
             
-            # Final fallback to current time
-            now = datetime.now()
+            # Final fallback to current time (timezone-aware)
+            now = datetime.now(timezone.utc)
             if not final_first_seen:
                 final_first_seen = now
             if not final_last_seen:

@@ -24,6 +24,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 import os
 
+from .file_lock import file_lock, FileLockError
+
 
 class BackupManager:
     """
@@ -109,15 +111,26 @@ class BackupManager:
         backup_name = f"{source.name}_{timestamp}.backup"
         backup_path = self.backup_dir / backup_name
 
+        # CRITICAL FIX #36: Lock source file during backup to prevent
+        # concurrent modifications causing inconsistent backup
+        lock_path = source.parent / f".{source.name}.lock"
+
         try:
-            # Copy file to backup location
-            shutil.copy2(source, backup_path)
+            with file_lock(lock_path, timeout=10, description=f"backup {source.name}"):
+                # File locked - safe to copy atomically
+                shutil.copy2(source, backup_path)
 
-            # Update cache to prevent duplicate backups
-            self._backup_cache[cache_key] = now
+                # Update cache to prevent duplicate backups
+                self._backup_cache[cache_key] = now
 
-            self.logger.info(f"Created backup: {backup_name}")
-            return backup_path
+                self.logger.info(f"Created backup: {backup_name}")
+                return backup_path
+
+        except FileLockError:
+            self.logger.warning(
+                f"Could not acquire lock for backup (file in use): {filepath}"
+            )
+            return None
         except Exception as e:
             self.logger.error(f"Backup failed for {filepath}: {e}")
             return None

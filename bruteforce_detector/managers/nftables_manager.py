@@ -32,6 +32,7 @@ import json
 import re
 import tempfile
 import os
+import threading
 from typing import Set, Dict, Tuple, Optional, List
 import ipaddress
 from datetime import datetime, timezone
@@ -65,6 +66,12 @@ class NFTablesManager:
         # Use large batch size for performance (config default is 1000)
         self.batch_size = max(self.config.batch_size, 1000)
 
+        # CRITICAL FIX #1: Thread-safe NFTables updates (prevent race conditions)
+        self._nftables_lock = threading.Lock()
+
+        # CRITICAL FIX #3: Validate NFTables sets exist on startup
+        self._validate_nftables_sets()
+
         # Shadow event log (optional, enabled via config)
         self.event_log_enabled = getattr(config, 'nftables_event_log_enabled', False)
         self.event_log_path = None
@@ -72,6 +79,71 @@ class NFTablesManager:
             state_dir = Path(config.state_dir)
             self.event_log_path = state_dir / 'nftables_events.jsonl'
             self.logger.info(f"NFTables event log enabled: {self.event_log_path}")
+
+    def _validate_nftables_sets(self):
+        """
+        Validate required NFTables sets exist on startup.
+
+        CRITICAL FIX #3: Prevents runtime failures when sets are missing.
+        Validates that blacklist_ipv4 and blacklist_ipv6 sets exist in
+        inet filter table before attempting any operations.
+
+        Raises:
+            RuntimeError: If required sets are missing and nftables updates are enabled
+        """
+        if not self.config.enable_nftables_update:
+            self.logger.debug("NFTables updates disabled, skipping set validation")
+            return
+
+        required_sets = [
+            ('inet', 'filter', 'blacklist_ipv4'),
+            ('inet', 'filter', 'blacklist_ipv6')
+        ]
+
+        missing_sets = []
+
+        for family, table, set_name in required_sets:
+            try:
+                cmd = ['/usr/sbin/nft', 'list', 'set', family, table, set_name]
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+
+                if result.returncode != 0:
+                    missing_sets.append(f"{family} {table} {set_name}")
+                    self.logger.warning(
+                        f"NFTables set not found: {family} {table} {set_name}"
+                    )
+                else:
+                    self.logger.debug(f"✓ Validated NFTables set: {family} {table} {set_name}")
+
+            except subprocess.TimeoutExpired:
+                self.logger.error(f"Timeout validating NFTables set: {family} {table} {set_name}")
+                missing_sets.append(f"{family} {table} {set_name}")
+            except FileNotFoundError:
+                self.logger.error("nft command not found - is nftables installed?")
+                raise RuntimeError(
+                    "NFTables not installed but enable_nftables_update=true. "
+                    "Install nftables or disable NFTables updates in config."
+                )
+            except Exception as e:
+                self.logger.error(f"Error validating NFTables set {set_name}: {e}")
+                missing_sets.append(f"{family} {table} {set_name}")
+
+        if missing_sets:
+            error_msg = (
+                f"CRITICAL: Required NFTables sets missing: {', '.join(missing_sets)}\n"
+                f"Create them with: sudo nft add set inet filter blacklist_ipv4 {{ type ipv4_addr\\; }}\n"
+                f"                  sudo nft add set inet filter blacklist_ipv6 {{ type ipv6_addr\\; }}\n"
+                f"Or disable NFTables updates in config (enable_nftables_update = false)"
+            )
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
+        self.logger.info("✓ All required NFTables sets validated successfully")
 
     def _sanitize_ip_for_nft(self, ip) -> str:
         """
@@ -433,6 +505,9 @@ class NFTablesManager:
         - Prevents inconsistent firewall state (partial IP lists, empty sets)
         - Uses nft -f with temporary file for all-or-nothing semantics
 
+        THREAD SAFETY FIX #1: Entire operation protected by lock to prevent concurrent
+        updates from multiple threads causing last-writer-wins race conditions.
+
         Performance: ~5 seconds for 37k IPs with crash safety
 
         Process (atomic transaction):
@@ -450,61 +525,88 @@ class NFTablesManager:
             self.logger.info("NFTables update disabled in config")
             return
 
-        try:
-            ipv4_list = list(blacklisted_ips['ipv4'])
-            ipv6_list = list(blacklisted_ips['ipv6'])
-            ipv4_count = len(ipv4_list)
-            ipv6_count = len(ipv6_list)
-
-            self.logger.info(f"Updating NFTables atomically: {ipv4_count} IPv4, {ipv6_count} IPv6")
-
-            # ATOMICITY FIX: Create single transaction for flush + add operations
-            # This ensures all-or-nothing semantics - no partial updates
-            temp_file = None
+        # CRITICAL FIX #1: Acquire lock for entire NFTables update operation
+        # Prevents race condition where multiple threads call update_blacklists()
+        # simultaneously, causing last writer wins and lost IP updates
+        with self._nftables_lock:
             try:
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.nft', delete=False) as f:
-                    temp_file = f.name
+                # CRITICAL FIX #2: Defense-in-depth whitelist validation
+                # Even though blacklist manager should prevent whitelisted IPs,
+                # validate again here before exporting to NFTables as last line of defense
+                ipv4_list = list(blacklisted_ips['ipv4'])
+                ipv6_list = list(blacklisted_ips['ipv6'])
 
-                    # Flush both sets (part of atomic transaction)
-                    f.write("flush set inet filter blacklist_ipv4\n")
-                    f.write("flush set inet filter blacklist_ipv6\n")
+                # Filter out any whitelisted IPs (defense-in-depth)
+                if self.whitelist_manager:
+                    original_ipv4_count = len(ipv4_list)
+                    original_ipv6_count = len(ipv6_list)
 
-                    # Add all IPv4 IPs in batches (within same transaction)
-                    if ipv4_list:
-                        for i in range(0, len(ipv4_list), self.batch_size):
-                            batch = ipv4_list[i:i+self.batch_size]
-                            ip_str = ','.join(self._sanitize_ip_for_nft(ip) for ip in batch)
-                            f.write(f"add element inet filter blacklist_ipv4 {{ {ip_str} }}\n")
+                    ipv4_list = [ip for ip in ipv4_list if not self.whitelist_manager.is_whitelisted(ip)]
+                    ipv6_list = [ip for ip in ipv6_list if not self.whitelist_manager.is_whitelisted(ip)]
 
-                    # Add all IPv6 IPs in batches (within same transaction)
-                    if ipv6_list:
-                        for i in range(0, len(ipv6_list), self.batch_size):
-                            batch = ipv6_list[i:i+self.batch_size]
-                            ip_str = ','.join(self._sanitize_ip_for_nft(ip) for ip in batch)
-                            f.write(f"add element inet filter blacklist_ipv6 {{ {ip_str} }}\n")
+                    filtered_ipv4 = original_ipv4_count - len(ipv4_list)
+                    filtered_ipv6 = original_ipv6_count - len(ipv6_list)
 
-                    f.flush()
+                    if filtered_ipv4 > 0 or filtered_ipv6 > 0:
+                        self.logger.warning(
+                            f"WHITELIST DEFENSE: Filtered {filtered_ipv4} IPv4 + {filtered_ipv6} IPv6 "
+                            f"whitelisted IPs before NFTables export (this should not happen - "
+                            f"indicates upstream whitelist check bypassed)"
+                        )
 
-                # Execute entire update atomically with nft -f
-                cmd = ['/usr/sbin/nft', '-f', temp_file]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                ipv4_count = len(ipv4_list)
+                ipv6_count = len(ipv6_list)
 
-                if result.returncode != 0:
-                    self.logger.error(f"Atomic NFTables update failed: {result.stderr}")
-                    raise RuntimeError(f"NFTables atomic update failed: {result.stderr}")
-                else:
-                    self.logger.info(f"SUCCESS: Updated NFTables atomically: {ipv4_count} IPv4, {ipv6_count} IPv6")
+                self.logger.info(f"Updating NFTables atomically: {ipv4_count} IPv4, {ipv6_count} IPv6")
 
-            finally:
-                # Clean up temporary file
-                if temp_file and os.path.exists(temp_file):
-                    try:
-                        os.unlink(temp_file)
-                    except Exception as e:
-                        self.logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
+                # ATOMICITY FIX: Create single transaction for flush + add operations
+                # This ensures all-or-nothing semantics - no partial updates
+                temp_file = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.nft', delete=False) as f:
+                        temp_file = f.name
 
-        except Exception as e:
-            self.logger.error(f"ERROR: NFTables update failed: {e}")
+                        # Flush both sets (part of atomic transaction)
+                        f.write("flush set inet filter blacklist_ipv4\n")
+                        f.write("flush set inet filter blacklist_ipv6\n")
+
+                        # Add all IPv4 IPs in batches (within same transaction)
+                        if ipv4_list:
+                            for i in range(0, len(ipv4_list), self.batch_size):
+                                batch = ipv4_list[i:i+self.batch_size]
+                                ip_str = ','.join(self._sanitize_ip_for_nft(ip) for ip in batch)
+                                f.write(f"add element inet filter blacklist_ipv4 {{ {ip_str} }}\n")
+
+                        # Add all IPv6 IPs in batches (within same transaction)
+                        if ipv6_list:
+                            for i in range(0, len(ipv6_list), self.batch_size):
+                                batch = ipv6_list[i:i+self.batch_size]
+                                ip_str = ','.join(self._sanitize_ip_for_nft(ip) for ip in batch)
+                                f.write(f"add element inet filter blacklist_ipv6 {{ {ip_str} }}\n")
+
+                        f.flush()
+
+                    # Execute entire update atomically with nft -f
+                    cmd = ['/usr/sbin/nft', '-f', temp_file]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+                    if result.returncode != 0:
+                        self.logger.error(f"Atomic NFTables update failed: {result.stderr}")
+                        raise RuntimeError(f"NFTables atomic update failed: {result.stderr}")
+                    else:
+                        self.logger.info(f"SUCCESS: Updated NFTables atomically: {ipv4_count} IPv4, {ipv6_count} IPv6")
+
+                finally:
+                    # Clean up temporary file
+                    if temp_file and os.path.exists(temp_file):
+                        try:
+                            os.unlink(temp_file)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
+
+            except Exception as e:
+                self.logger.error(f"ERROR: NFTables update failed: {e}")
+                raise  # Re-raise to propagate error to caller
 
     def _flush_set(self, set_name: str):
         """

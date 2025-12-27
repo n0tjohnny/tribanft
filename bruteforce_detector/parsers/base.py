@@ -16,6 +16,7 @@ from typing import List, Iterator, Optional, Tuple
 from pathlib import Path
 import logging
 import re
+import threading
 
 from ..models import SecurityEvent
 
@@ -25,6 +26,7 @@ class BaseLogParser(ABC):
 
     # Class-level pattern loader (shared across all parser instances)
     _pattern_loader: Optional['ParserPatternLoader'] = None
+    _pattern_loader_lock = threading.Lock()  # Thread-safe singleton initialization (Fix #26)
 
     def __init__(self, log_path: str):
         """
@@ -37,15 +39,19 @@ class BaseLogParser(ABC):
         self.logger = logging.getLogger(self.__class__.__name__)
 
         # Initialize pattern loader if not already done (singleton pattern)
+        # Thread-safe double-checked locking (Fix #26)
         if BaseLogParser._pattern_loader is None:
-            try:
-                from ..core.parser_pattern_loader import ParserPatternLoader
-                patterns_dir = Path(__file__).parent.parent / "rules" / "parsers"
-                BaseLogParser._pattern_loader = ParserPatternLoader(patterns_dir)
-                self.logger.debug(f"Initialized ParserPatternLoader with directory: {patterns_dir}")
-            except Exception as e:
-                self.logger.error(f"Failed to initialize ParserPatternLoader: {e}")
-                BaseLogParser._pattern_loader = None
+            with BaseLogParser._pattern_loader_lock:
+                # Check again after acquiring lock
+                if BaseLogParser._pattern_loader is None:
+                    try:
+                        from ..core.parser_pattern_loader import ParserPatternLoader
+                        patterns_dir = Path(__file__).parent.parent / "rules" / "parsers"
+                        BaseLogParser._pattern_loader = ParserPatternLoader(patterns_dir)
+                        self.logger.debug(f"Initialized ParserPatternLoader with directory: {patterns_dir}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to initialize ParserPatternLoader: {e}")
+                        BaseLogParser._pattern_loader = None
 
         # Load patterns for this parser if METADATA exists
         if hasattr(self, 'METADATA') and BaseLogParser._pattern_loader is not None:

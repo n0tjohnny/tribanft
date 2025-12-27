@@ -140,6 +140,12 @@ prelogin_pattern_threshold = 20
 # Port scan detection threshold
 port_scan_threshold = 20
 
+# Fail-fast mode for detector errors (optional strictness)
+# When true: raises exception if any detector fails (strict mode)
+# When false: logs warning and continues detection (default)
+# Default: false
+fail_on_detector_error = false
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # [features] - Enable/Disable Features

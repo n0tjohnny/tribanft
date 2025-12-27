@@ -20,6 +20,8 @@ import os
 import time
 import threading
 import logging
+import json
+import tempfile
 from pathlib import Path
 from typing import Dict, Callable, Optional, List, Set
 from datetime import datetime, timedelta
@@ -118,6 +120,10 @@ class LogWatcher:
         self.event_window_start = time.time()
         self.max_events_per_second = getattr(config, 'max_events_per_second', 1000)
         self.paused_until: Optional[float] = None
+
+        # Rate limit state persistence (Fix #20)
+        self.state_file = Path(config.state_dir) / 'log_watcher_rate_limit.json'
+        self._load_rate_limit_state()
 
         # Watchdog observer
         self.observer: Optional[Observer] = None
@@ -264,14 +270,76 @@ class LogWatcher:
             except Exception as e:
                 self.logger.error(f"Error processing file modification {file_path}: {e}")
 
+    def _load_rate_limit_state(self):
+        """
+        Load rate limit state from disk (survives restarts).
+
+        FIX #20: Persists rate limit backoff across daemon restarts
+        to prevent DoS bypass via restart cycling.
+        """
+        if not self.state_file.exists():
+            return
+
+        try:
+            with open(self.state_file, 'r') as f:
+                state = json.load(f)
+
+            # Restore paused_until if still valid
+            paused_until = state.get('paused_until')
+            if paused_until and paused_until > time.time():
+                self.paused_until = paused_until
+                remaining = int(paused_until - time.time())
+                self.logger.warning(
+                    f"Rate limit backoff restored: {remaining}s remaining "
+                    f"(from previous session - DoS protection active)"
+                )
+            else:
+                self.paused_until = None
+
+        except Exception as e:
+            self.logger.warning(f"Could not load rate limit state: {e}")
+
+    def _save_rate_limit_state(self):
+        """
+        Save rate limit state to disk for persistence across restarts.
+
+        FIX #20: Uses atomic write pattern (tempfile + rename).
+        """
+        try:
+            state = {
+                'paused_until': self.paused_until,
+                'last_saved': time.time()
+            }
+
+            # Atomic write
+            fd, temp_path = tempfile.mkstemp(
+                dir=self.state_file.parent,
+                prefix=".rate_limit.",
+                suffix=".tmp"
+            )
+
+            with os.fdopen(fd, 'w') as f:
+                json.dump(state, f)
+
+            os.replace(temp_path, self.state_file)
+
+        except Exception as e:
+            self.logger.warning(f"Could not save rate limit state: {e}")
+
     def _check_rate_limit(self) -> bool:
         """
         Check if rate limit is exceeded.
+
+        FIX #20: Now persists backoff state to survive restarts.
 
         Returns:
             True if processing should continue, False if rate limited
         """
         now = time.time()
+
+        # Check if paused (Fix #20: restored from state file)
+        if self.paused_until and now < self.paused_until:
+            return False
 
         # Reset window every second
         if now - self.event_window_start >= 1.0:
@@ -284,6 +352,9 @@ class LogWatcher:
         if self.event_count > self.max_events_per_second:
             backoff_seconds = getattr(self.config, 'rate_limit_backoff', 30)
             self.paused_until = now + backoff_seconds
+
+            # PERSIST STATE (Fix #20)
+            self._save_rate_limit_state()
 
             self.logger.warning(
                 f"Rate limit exceeded ({self.event_count} events/sec > {self.max_events_per_second})"

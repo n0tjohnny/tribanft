@@ -40,6 +40,7 @@ class RealtimeDetectionMixin:
         self.realtime_available = False
         self.log_watcher: Optional[LogWatcher] = None
         self.parser_map = {}  # Maps file paths to parser instances
+        self.parser_locks = {}  # Maps file paths to locks for thread safety (Fix #21)
         self._stop_event = threading.Event()  # RACE CONDITION FIX (C9): Coordinated shutdown
 
         # Check if watchdog is available
@@ -75,6 +76,9 @@ class RealtimeDetectionMixin:
 
                 # Store parser mapping
                 self.parser_map[str(file_path)] = parser
+
+                # Create lock for thread-safe parser access (Fix #21)
+                self.parser_locks[str(file_path)] = threading.Lock()
 
             self.realtime_available = True
             self.logger.info("Real-time monitoring initialized successfully")
@@ -168,6 +172,9 @@ class RealtimeDetectionMixin:
 
         Parses new content incrementally and triggers detection.
 
+        FIX #21: Added thread-safe parser locking to prevent concurrent
+        parser access if same file monitored via multiple paths.
+
         Args:
             file_path: Path to modified file
             from_offset: Starting byte offset
@@ -179,7 +186,14 @@ class RealtimeDetectionMixin:
             self.logger.warning(f"No parser for modified file: {file_path}")
             return
 
+        # Acquire parser lock for thread-safe access (Fix #21)
+        lock = self.parser_locks.get(file_path)
+
         try:
+            # Lock parser to prevent concurrent access
+            if lock:
+                lock.acquire()
+
             # Parse incrementally
             events, final_offset = parser.parse_incremental(from_offset, to_offset)
 
@@ -195,6 +209,10 @@ class RealtimeDetectionMixin:
 
         except Exception as e:
             self.logger.error(f"Error processing file modification {file_path}: {e}")
+        finally:
+            # Always release lock
+            if lock and lock.locked():
+                lock.release()
 
     def _run_detectors_on_events(self, events: List[SecurityEvent]) -> List[DetectionResult]:
         """

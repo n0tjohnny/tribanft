@@ -69,9 +69,9 @@ Most tools stop at detection. **TribanFT explains the “why” behind the attac
 
 ```bash
 # Download latest release
-wget https://github.com/n0tjohnny/tribanft/archive/v2.7.0.tar.gz
-tar -xzf v2.7.0.tar.gz
-cd tribanft-2.7.0
+wget https://github.com/n0tjohnny/tribanft/archive/v2.8.0.tar.gz
+tar -xzf v2.8.0.tar.gz
+cd tribanft-2.8.0
 
 # Automated installation (one command)
 ./install.sh
@@ -190,6 +190,7 @@ tribanft --live-monitor                    # Live threat stream monitoring
 sudo systemctl status tribanft             # Check service status
 sudo journalctl -u tribanft -f             # Live logs
 sudo systemctl restart tribanft            # Restart service
+sudo systemctl stop tribanft               # Graceful shutdown
 scripts/setup-config.sh --production       # Configure for production
 ```
 

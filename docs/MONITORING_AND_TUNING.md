@@ -209,6 +209,22 @@ batch_size = 2000
 backup_interval_days = 7
 ```
 
+### NEW in v2.8.0
+
+**SQLite Backup Improvements**
+- Backups now use SQLite backup() API instead of file copy
+- Backups are consistent even during active database writes
+- Backup filename includes timestamp: blacklist.db.backup.YYYYMMDD_HHMMSS
+- Integrity verification automatically performed after backup
+- See database.py:create_backup() for implementation details
+
+**Rate Limit State Persistence**
+- Rate limit tracking now persists across process restarts
+- State file: {data_dir}/rate_limit_state.json
+- Automatically saved when rate limit exceeded
+- Automatically loaded on startup
+- DoS protection settings survive service restarts
+
 ---
 
 ## Weekly Monitoring Routine

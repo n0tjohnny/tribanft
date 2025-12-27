@@ -99,6 +99,27 @@ pip3 install --user pyyaml pydantic pydantic-settings watchdog
 sudo ~/.local/share/tribanft/scripts/setup_nftables.sh
 ```
 
+### NFTables Failure Handling (v2.8.0)
+
+TribanFT now handles NFTables failures gracefully:
+- Blacklist storage always updated successfully
+- NFTables sync failures logged with clear error messages
+- Manual sync available: tribanft --sync-files
+- Check logs: journalctl -u tribanft | grep -i nftables
+- Graceful degradation prevents data loss
+
+Recovery from NFTables failures:
+```bash
+# View current blacklist state
+tribanft --show-blacklist
+
+# Manual sync to firewall
+tribanft --sync-files
+
+# Verify NFTables state
+sudo nft list set inet filter blacklist_ipv4
+```
+
 ---
 
 ## Commands
