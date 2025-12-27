@@ -8,8 +8,8 @@
 # On server
 cd ~
 wget https://github.com/n0tjohnny/tribanft/archive/v2.5.9.tar.gz
-tar -xzf v2.5.9.tar.gz
-cd tribanft-2.5.9
+tar -xzf v2.8.0.tar.gz
+cd tribanft-2.8.0
 ./install.sh
 ```
 
