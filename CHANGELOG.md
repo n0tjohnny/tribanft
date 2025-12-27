@@ -122,7 +122,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Risk**: LOW - All changes are defensive improvements
 **Breaking Changes**: None (exception handling added in callers)
-**Testing**: Comprehensive test suite in tribanft-v2.8.0/audit-phase2-testing-guide.md
 
 ---
 
