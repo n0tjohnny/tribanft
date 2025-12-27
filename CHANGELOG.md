@@ -31,15 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added COALESCE fallback when json_patch() not available
   - Impact: Prevents metadata loss on older SQLite versions
 
-### Added
-
-#### Documentation
-- **CLAUDE.md** - Added @ERROR_HANDLING_POLICY section
-  - Comprehensive guide on when to raise exceptions vs return False
-  - Clear patterns for managers, user operations, and parsers
-  - Critical rules for exception propagation changes
-  - Impact: Clear guidance for future development
-
 ### Security
 
 #### Audit Findings - Already Protected
