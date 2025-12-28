@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.3] - 2025-12-27
+
+### Fixed
+
+#### EventTypes Missing from Blacklist Files
+- **bruteforce_detector/managers/blacklist_writer.py** - Fixed EventTypes omission in file output
+  - Added missing `EventTypes` field to _write_ip_entry() method (line 608)
+  - Impact: Attack types now visible in blacklist TXT files for forensic analysis
+  - Previously: EventTypes were collected and stored in database but never written to files
+  - Root cause: Prepared `event_types_str` variable but missing write statement
+  - Fixed: Added `file_obj.write(f"#   EventTypes: {event_types_str}\n")`
+  - Now shows: `#   EventTypes: failed_login,port_scan` in blacklist comments
+
+### Notes
+
+Bugfix release addressing EventTypes visibility. While EventTypes were correctly stored in the SQLite database, they were never written to blacklist text files due to missing write statement. This affected forensic analysis and file-based queries. Database users were unaffected.
+
+---
+
 ## [2.8.2] - 2025-12-27
 
 ### Fixed

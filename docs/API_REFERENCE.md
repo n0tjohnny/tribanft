@@ -116,6 +116,72 @@ result = DetectionResult(
 
 ---
 
+## File Formats
+
+### Blacklist File Format
+
+Enhanced blacklist files with comprehensive metadata for forensic analysis.
+
+**Location**: `~/.local/share/tribanft/blacklist_ipv4.txt`, `blacklist_ipv6.txt`
+
+**Structure**:
+
+```
+# ======================================================================================================================
+# ENHANCED BLACKLIST - COMPREHENSIVE THREAT INTELLIGENCE
+# ======================================================================================================================
+# Last Updated: 2025-12-27 21:35:16
+#
+# STATISTICS:
+#   Total IPs: 102450 (New: 0)
+#   High Confidence: 67017 | Medium: 3
+#   Total Events: 1084407811762428500000000000000000000000
+#   With Geolocation: 53319 (52.0%)
+# ======================================================================================================================
+
+# ----------------------------------------------------------------------------------------------------------------------
+# SOURCE: AUTOMATIC (31450 IPs)
+# ----------------------------------------------------------------------------------------------------------------------
+
+# IP: 1.2.3.4 | US, New York | Acme ISP Inc
+#   Reason: SQL injection: 15 attempts in 5 minutes
+#   Events: 15
+#   EventTypes: sql_injection,http_error_4xx
+#   First: 2025-12-27 10:30 | Last: 2025-12-27 10:35 | Added: 2025-12-27 10:35
+#   Source: automatic
+1.2.3.4
+```
+
+**Metadata Fields**:
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| IP | IP address with geolocation and ISP | `1.2.3.4 \| US, New York \| Acme ISP` |
+| Reason | Human-readable block reason | `SQL injection: 15 attempts` |
+| Events | Total event count | `15` |
+| **EventTypes** | Comma-separated attack types | `sql_injection,port_scan` |
+| First | First detection timestamp | `2025-12-27 10:30` |
+| Last | Last detection timestamp | `2025-12-27 10:35` |
+| Added | Date added to blacklist | `2025-12-27 10:35` |
+| Source | Detection source | `automatic`, `manual`, `crowdsec_csv_import` |
+
+**NEW in v2.8.3**: EventTypes field now written to files for forensic analysis
+
+**EventTypes Values**: See [EventType Enum](#eventtype-enum) table above
+
+**Sources**:
+- `automatic` - Detected by TribanFT detectors/rules
+- `manual` - Manually added via `--blacklist-add`
+- `crowdsec_csv_import` - Imported from CrowdSec CSV
+- `nftables_import` - Imported from existing NFTables sets
+- `legacy` - Pre-existing entries without metadata
+
+**Reading**: Use `BlacklistWriter.read_blacklist()` to parse with full metadata preservation
+
+**Writing**: Use `BlacklistWriter.write_blacklist()` with corruption protection and automatic backups
+
+---
+
 ## Base Classes
 
 ### BaseDetector

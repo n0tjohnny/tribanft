@@ -605,6 +605,7 @@ class BlacklistWriter:
         file_obj.write(f"# IP: {ip_str} | {location} | {isp}\n")
         file_obj.write(f"#   Reason: {info.get('reason', 'Unknown')}\n")
         file_obj.write(f"#   Events: {info.get('event_count', 0)}\n")
+        file_obj.write(f"#   EventTypes: {event_types_str}\n")
         file_obj.write(f"#   First: {first_seen} | ")
         file_obj.write(f"Last: {last_seen} | ")
         file_obj.write(f"Added: {date_added}\n")

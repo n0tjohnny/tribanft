@@ -21,7 +21,7 @@
 | `--no-log-search` | - | Skip automatic log investigation when manually adding IP |
 | `--blacklist-remove` | `<IP>` | Remove IP from all blacklist files and database |
 | `--blacklist-search` | `<IP>` | Search logs for IP activity without adding to blacklist |
-| `--show-blacklist` | - | Display all blocked IPs with metadata (reason, country, timestamps, event counts) |
+| `--show-blacklist` | - | Display all blocked IPs with metadata (reason, country, timestamps, event counts, attack types) |
 | `--show-manual` | - | Display only manually added blacklist entries with reasons |
 | **Whitelist** |||
 | `--whitelist-add` | `<IP>` | Add to whitelist (never blocked) |
@@ -31,7 +31,7 @@
 | `--query-ip` | `<IP>` | Detailed IP information (geolocation, attack timeline, event types, sources) |
 | `--query-country` | `<CODE>` | List all IPs from country code (e.g., CN, RU, US, BR) |
 | `--query-reason` | `<TEXT>` | Search IPs by block reason (partial text match) |
-| `--query-attack-type` | `<TYPE>` | Filter by attack type (sql_injection, ssh_attack, dns_attack, port_scan, etc.) |
+| `--query-attack-type` | `<TYPE>` | Filter by attack type (sql_injection, ssh_attack, dns_attack, port_scan, etc.) - NEW v2.8.3: EventTypes now visible in blacklist files |
 | `--query-timerange` | `<RANGE>` | Filter by time range (format: "2025-12-01 to 2025-12-24" or "last 7 days") |
 | `--list-countries` | - | List all countries with IP counts and percentages |
 | `--list-sources` | - | List detection sources with counts (detectors, CrowdSec, manual, NFTables) |
