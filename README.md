@@ -50,8 +50,6 @@ sudo systemctl status tribanft
 sudo journalctl -u tribanft -f
 ```
 
-**v2.9.1 Changes**: Config parser bug fix; organized directory structure with automatic migration (backups stored in `backups/`, logs in `logs/` with rotation)
-
 **That's it.** TribanFT starts detecting attacks immediately using sensible defaults.
 
 ---
