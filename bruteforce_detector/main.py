@@ -618,7 +618,7 @@ def main():
     parser.add_argument('--show-manual', action='store_true', help='Show manual blacklist only')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
     parser.add_argument('--daemon', action='store_true', help='Run as daemon service (real-time monitoring with auto-fallback)')
-    parser.add_argument('--migrate', action='store_true', help='Migrate from cron-based setup to systemd')
+    # Removed --migrate argument (obsolete cron-to-systemd migration from v2.8.x)
     parser.add_argument('--sync-files', action='store_true', help='Force sync database to blacklist files')
     parser.add_argument('--sync-output', type=str, help='Custom output file for sync (default: config file)')
     parser.add_argument('--sync-stats', action='store_true', help='Show database statistics with sync')
@@ -654,11 +654,8 @@ def main():
     log_level = logging.DEBUG if args.verbose else logging.INFO
     setup_logging(level=log_level)
 
-    # Handle migration command
-    if args.migrate:
-        from bruteforce_detector.utils.migration import migrate_to_systemd
-        migrate_to_systemd(dry_run=False)
-        sys.exit(0)
+    # Removed --migrate command (obsolete cron-to-systemd migration from v2.8.x)
+    # Directory structure migration happens automatically via config.py
 
     # Handle integrity and backup commands first (don't need full engine)
     if args.verify:
@@ -1050,9 +1047,8 @@ def main():
             # Daemon mode: real-time monitoring with automatic fallback
             logger = logging.getLogger(__name__)
 
-            # Check for old cron-based setup and warn
-            from bruteforce_detector.utils.migration import check_and_warn_migration
-            check_and_warn_migration(logger)
+            # Removed obsolete cron-to-systemd migration check (v2.8.x feature)
+            # v2.9.0+ uses auto_migrate_to_organized_structure() instead (automatic in config.py)
 
             if engine.realtime_available:
                 # Real-time monitoring mode

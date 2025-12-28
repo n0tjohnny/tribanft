@@ -55,7 +55,6 @@
 | `--compress-backups` | - | Compress old uncompressed backups to save storage space (preserves all data) |
 | **Integration** |||
 | `--import-crowdsec-csv` | `<CSV>` | Import CrowdSec CSV data (replaces blacklist with trusted threat intelligence) |
-| `--migrate` | - | Migrate from legacy cron-based setup to modern systemd service |
 
 ---
 

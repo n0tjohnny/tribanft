@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Impact: Service failed to start with default config.conf.template on fresh installs
   - File: `bruteforce_detector/config.py`
 
+- **Main Module**: Removed obsolete cron-to-systemd migration code from v2.8.x
+  - `ImportError: cannot import name 'check_and_warn_migration'` in daemon mode at `main.py:1054`
+  - `ImportError: cannot import name 'migrate_to_systemd'` when using `--migrate` command
+  - Root cause: v2.9.0 refactoring removed migration.py functions but main.py still referenced them
+  - Fix: Removed import/call to `check_and_warn_migration()` (lines 1053-1054); removed `--migrate` argument and handler (lines 621, 657-658)
+  - Impact: Service crashed on startup in daemon mode (production outage); `--migrate` command broken
+  - Note: Directory migration now happens automatically via config.py; cron-to-systemd migration no longer relevant
+  - Files: `bruteforce_detector/main.py`, `docs/COMMANDS.md`
+
 ---
 
 ## [2.9.0] - 2025-12-27
