@@ -273,6 +273,32 @@ class DetectorConfig(BaseSettings):
         description="TribanFT binary path"
     )
 
+    # === Organized Subdirectories (v2.9.0+) ===
+    data_subdir: str = Field(
+        default="",
+        description="Subdirectory for firewall data files"
+    )
+    state_subdir: str = Field(
+        default="",
+        description="Subdirectory for runtime state files"
+    )
+    cache_subdir: str = Field(
+        default="",
+        description="Subdirectory for temporary cache files"
+    )
+    logs_subdir: str = Field(
+        default="",
+        description="Subdirectory for application logs"
+    )
+    backup_subdir: str = Field(
+        default="",
+        description="Subdirectory for backup files"
+    )
+
+    # === Log Rotation Settings (v2.9.0+) ===
+    log_max_bytes: int = 10485760  # 10MB default
+    log_backup_count: int = 5  # Keep 5 rotated files
+
     # === Log Paths ===
     syslog_path: str = "/var/log/syslog"
     mssql_error_log_path: str = "/var/opt/mssql/log/errorlog"
@@ -405,6 +431,82 @@ class DetectorConfig(BaseSettings):
         tribanft_bin = _get_from_sources('tribanft_bin', config_dict, 'TRIBANFT_')
         if tribanft_bin:
             self.tribanft_bin = tribanft_bin
+
+        # Resolve organized subdirectories (v2.9.0+)
+        # SECURITY: Validate paths to prevent directory traversal attacks
+        base_dir = Path(self.data_dir).resolve()
+
+        def _validate_subdir(path_str: str, default_name: str) -> str:
+            """
+            Validate subdirectory path prevents traversal outside base_dir.
+
+            Security: Prevents path traversal attacks by ensuring configured
+            subdirs resolve to paths within base_dir.
+
+            Args:
+                path_str: Configured subdirectory path
+                default_name: Default subdirectory name if validation fails
+
+            Returns:
+                Validated absolute path string
+
+            Raises:
+                ValueError: If path escapes base_dir containment
+            """
+            if not path_str:
+                return str(base_dir / default_name)
+
+            # Resolve to absolute path and check containment
+            subdir_path = Path(path_str).resolve()
+
+            # Security check: Must be within base_dir
+            try:
+                subdir_path.relative_to(base_dir)
+            except ValueError:
+                logger.error(
+                    f"Security: Subdirectory '{path_str}' is outside base directory "
+                    f"'{base_dir}'. Using default '{default_name}' instead."
+                )
+                return str(base_dir / default_name)
+
+            return str(subdir_path)
+
+        if not self.data_subdir:
+            value = _get_from_sources('data_subdir', config_dict, 'TRIBANFT_')
+            self.data_subdir = _validate_subdir(value, 'data')
+
+        if not self.state_subdir:
+            value = _get_from_sources('state_subdir', config_dict, 'TRIBANFT_')
+            self.state_subdir = _validate_subdir(value, 'state')
+
+        if not self.cache_subdir:
+            value = _get_from_sources('cache_subdir', config_dict, 'TRIBANFT_')
+            self.cache_subdir = _validate_subdir(value, 'cache')
+
+        if not self.logs_subdir:
+            value = _get_from_sources('logs_subdir', config_dict, 'TRIBANFT_')
+            self.logs_subdir = _validate_subdir(value, 'logs')
+
+        if not self.backup_subdir:
+            value = _get_from_sources('backup_subdir', config_dict, 'TRIBANFT_')
+            self.backup_subdir = _validate_subdir(value, 'backups')
+
+        # Load log rotation settings (v2.9.0+)
+        log_max_str = _get_from_sources('log_max_bytes', config_dict)
+        if log_max_str:
+            try:
+                self.log_max_bytes = int(log_max_str)
+                logger.debug(f"DEBUG: CONFIG: log_max_bytes = {log_max_str}")
+            except ValueError:
+                logger.warning(f"Invalid integer value for log_max_bytes: {log_max_str}")
+
+        log_count_str = _get_from_sources('log_backup_count', config_dict)
+        if log_count_str:
+            try:
+                self.log_backup_count = int(log_count_str)
+                logger.debug(f"DEBUG: CONFIG: log_backup_count = {log_count_str}")
+            except ValueError:
+                logger.warning(f"Invalid integer value for log_backup_count: {log_count_str}")
 
         # Resolve log paths
         syslog = _get_from_sources('syslog_path', config_dict)
@@ -640,6 +742,7 @@ class DetectorConfig(BaseSettings):
         """Create required directories if they don't exist"""
         logger = logging.getLogger(__name__)
 
+        # Create main directories
         for dir_path in [self.data_dir, self.config_dir, self.state_dir]:
             path = Path(dir_path)
             if not path.exists():
@@ -653,28 +756,56 @@ class DetectorConfig(BaseSettings):
                     logger.error(f"Failed to create directory {path}: {e}")
                     raise
 
-        # Create backup directory
-        backup_dir = Path(self.state_dir) / 'backups'
-        if not backup_dir.exists():
-            try:
-                backup_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
-                logger.info(f"Created backup directory: {backup_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to create backup directory {backup_dir}: {e}")
+        # Create organized subdirectories (v2.9.0+) using configured paths
+        # Security: Different permissions based on data sensitivity
+        # Note: mkdir(mode=X) doesn't guarantee permissions with parents=True
+        # due to umask influence. We use explicit chmod() after creation.
+        subdirs_with_perms = [
+            (Path(self.data_subdir), 0o755, "data files (public IPs)"),
+            (Path(self.state_subdir), 0o750, "state files (sensitive metadata)"),
+            (Path(self.cache_subdir), 0o755, "cache files (public geolocation)"),
+            (Path(self.logs_subdir), 0o750, "logs (may contain sensitive info)"),
+            (Path(self.backup_subdir), 0o750, "backups (critical data)"),
+        ]
+
+        # Preserve user's scripts/ and systemd/ directories if they exist
+        scripts_dir = Path(self.data_dir) / 'scripts'
+        systemd_dir = Path(self.data_dir) / 'systemd'
+        if scripts_dir.exists():
+            subdirs_with_perms.append((scripts_dir, 0o755, "user scripts"))
+        if systemd_dir.exists():
+            subdirs_with_perms.append((systemd_dir, 0o755, "systemd overrides"))
+
+        for subdir, mode, description in subdirs_with_perms:
+            if not subdir.exists():
+                try:
+                    # Create directory first
+                    subdir.mkdir(parents=True, exist_ok=True)
+                    # Then explicitly set permissions (guaranteed to work)
+                    subdir.chmod(mode)
+                    logger.debug(f"Created subdirectory: {subdir} ({oct(mode)}) - {description}")
+                except Exception as e:
+                    logger.warning(f"Failed to create subdirectory {subdir}: {e}")
 
         # Create IPInfo cache directory
         if self.ipinfo_cache_dir:
             ipinfo_cache_path = Path(self.ipinfo_cache_dir)
             if not ipinfo_cache_path.exists():
                 try:
-                    ipinfo_cache_path.mkdir(parents=True, exist_ok=True, mode=0o755)
-                    logger.info(f"Created IPInfo cache directory: {ipinfo_cache_path}")
+                    # Security: mkdir(mode=X) doesn't guarantee with parents=True
+                    ipinfo_cache_path.mkdir(parents=True, exist_ok=True)
+                    ipinfo_cache_path.chmod(0o755)  # Public cache data, world-readable OK
+                    logger.info(f"Created IPInfo cache directory: {ipinfo_cache_path} (0o755)")
                 except Exception as e:
                     logger.warning(f"Failed to create IPInfo cache directory {ipinfo_cache_path}: {e}")
 
     def get_backup_dir(self) -> Path:
-        """Get backup directory path"""
-        return Path(self.state_dir) / 'backups'
+        """Get backup directory path (v2.9.0+: uses configured backup_subdir)"""
+        return Path(self.backup_subdir)
+
+    def get_logs_dir(self) -> Path:
+        """Get logs directory path (v2.9.0+: uses configured logs_subdir)"""
+        return Path(self.logs_subdir)
 
 
 # Global configuration instance (singleton pattern)
@@ -688,11 +819,24 @@ def get_config() -> DetectorConfig:
     Ensures configuration is loaded once and shared across modules.
     Automatically creates required directories on first access.
 
-    Auto-syncs new template options before loading configuration,
-    ensuring users receive new features while preserving their settings.
+    Startup sequence (v2.9.0+):
+    1. Auto-migrate to organized structure (one-time, if needed)
+    2. Auto-sync config.conf with template (merge new options)
+    3. Load configuration
+    4. Ensure directories exist
     """
     global _config_instance
     if _config_instance is None:
+        # MIGRATION (v2.9.0+): Auto-migrate to organized structure
+        # This runs once on first startup after upgrading to v2.9.0+
+        # Moves files from flat structure to organized subdirectories
+        try:
+            from .utils.migration import auto_migrate_to_organized_structure
+            auto_migrate_to_organized_structure()
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Auto-migration failed: {e}")
+            logging.getLogger(__name__).info("Continuing with files in current locations")
+
         # AUTO-SYNC: Merge new template options before loading
         # This ensures users automatically receive new configuration options
         # from template updates without losing their customized settings

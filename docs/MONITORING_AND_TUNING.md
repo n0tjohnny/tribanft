@@ -176,11 +176,17 @@ tribanft --whitelist-add IP --reason "Description"
 # Check CPU/Memory
 top -p $(pgrep -f tribanft)
 
-# Disk usage
+# Disk usage (organized structure v2.9.0+)
 du -h ~/.local/share/tribanft/
 
-# Database size (if using SQLite)
-ls -lh ~/.local/share/tribanft/blacklist.db
+# Database size (if using SQLite) - v2.9.0+
+ls -lh ~/.local/share/tribanft/state/blacklist.db
+
+# Log files size - v2.9.0+
+ls -lh ~/.local/share/tribanft/logs/
+
+# Backup files - v2.9.0+
+du -h ~/.local/share/tribanft/backups/
 ```
 
 ### Performance Issues
@@ -190,7 +196,8 @@ ls -lh ~/.local/share/tribanft/blacklist.db
 | High CPU | Rule complexity | Simplify regex patterns |
 | High memory | Large blacklist | Use database mode |
 | Slow startup | Plugin count | Disable unused plugins |
-| Disk full | Backup retention | Adjust retention settings |
+| Disk full | Backup retention | Adjust retention settings, check `backups/` dir (v2.9.0+) |
+| Large logs | Log rotation | Check `log_max_bytes` and `log_backup_count` (v2.9.0+) |
 
 ### Optimization
 

@@ -7,13 +7,15 @@
 ```bash
 # On server
 cd ~
-wget https://github.com/n0tjohnny/tribanft/archive/v2.5.9.tar.gz
-tar -xzf v2.8.0.tar.gz
-cd tribanft-2.8.0
+wget https://github.com/n0tjohnny/tribanft/archive/v2.9.0.tar.gz
+tar -xzf v2.9.0.tar.gz
+cd tribanft-2.9.0
 ./install.sh
 ```
 
 Done. The script handles everything automatically.
+
+**v2.9.0+ Directory Organization**: On first startup, the system automatically migrates to organized subdirectories (`data/`, `state/`, `cache/`, `logs/`, `backups/`). A full backup is created before migration.
 
 ---
 

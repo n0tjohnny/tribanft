@@ -82,11 +82,25 @@ def sync_config(config_file: Path, template_file: Path,
         logger.info(f"Created new config from template")
         return (0, 0)
 
-    # Backup original
+    # Backup original (v2.9.0+: organized in backups/ subdirectory)
     if backup:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup_path = config_file.with_suffix(f'.conf.backup-{timestamp}')
+        # Determine backup directory (next to config file, in organized structure)
+        # Assume config.conf is in data_dir, backups go to data_dir/backups/
+        backup_dir = config_file.parent / 'backups'
+
+        # Security: Create backup directory and guarantee restrictive permissions
+        # Note: mkdir(mode=X) doesn't guarantee permissions with parents=True
+        # due to umask influence. Must use explicit chmod() after creation.
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_dir.chmod(0o750)  # Guaranteed: owner+group only
+
+        backup_path = backup_dir / f'config.conf_{timestamp}.backup'
         shutil.copy(config_file, backup_path)
+
+        # Security: Ensure backup file has restrictive permissions (640)
+        backup_path.chmod(0o640)
+
         logger.info(f"Backup created: {backup_path}")
 
     # Load template

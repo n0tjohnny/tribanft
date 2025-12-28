@@ -32,6 +32,14 @@ config_dir = ~/.local/share/tribanft
 # Stores runtime state, database, backups, and logs
 state_dir = ~/.local/share/tribanft
 
+# --- Organized Subdirectories (v2.9.0+) ---
+# Subdirectories for organized file storage (fully configurable)
+data_subdir = ${paths:data_dir}/data
+state_subdir = ${paths:data_dir}/state
+cache_subdir = ${paths:data_dir}/cache
+logs_subdir = ${paths:data_dir}/logs
+backup_subdir = ${paths:data_dir}/backups
+
 # --- Python Interpreter ---
 # Path to Python 3 interpreter
 python_bin = /usr/bin/python3
@@ -77,46 +85,53 @@ smtp_log_path = /var/log/mail.log
 #               /var/log/unbound.log (Unbound)
 dns_log_path = /var/log/named/query.log
 
-# TribanFT application log (auto-generated in state_dir if not specified)
-app_log_path = ${paths:state_dir}/tribanft.log
+# TribanFT application log (organized in logs subdirectory)
+app_log_filename = tribanft.log
+app_log_path = ${paths:logs_subdir}/${logs:app_log_filename}
+
+# Log rotation settings (v2.9.0+)
+log_max_bytes = 10485760      # 10MB per file before rotation
+log_backup_count = 5          # Keep 5 rotated files (auto-compressed with gzip)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [data_files] - Data File Locations
+# [data_files] - Data File Locations (organized in data/ subdirectory)
 # ═══════════════════════════════════════════════════════════════════════════
-# Note: By default, these are auto-generated in data_dir
-#       Uncomment to override specific file locations
+# File names and paths are fully configurable - change filenames or directories as needed
 [data_files]
 
-# IPv4 blacklist file
-blacklist_ipv4_file = ${paths:data_dir}/blacklist_ipv4.txt
+# Configurable filenames (change if you want different names)
+blacklist_ipv4_filename = blacklist_ipv4.txt
+blacklist_ipv6_filename = blacklist_ipv6.txt
+prelogin_bruteforce_filename = prelogin-bruteforce-ips.txt
+whitelist_filename = whitelist_ips.txt
+manual_blacklist_filename = manual_blacklist.txt
 
-# IPv6 blacklist file
-blacklist_ipv6_file = ${paths:data_dir}/blacklist_ipv6.txt
-
-# Prelogin bruteforce IPs file
-prelogin_bruteforce_file = ${paths:data_dir}/prelogin-bruteforce-ips.txt
-
-# Whitelist file
-whitelist_file = ${paths:data_dir}/whitelist_ips.txt
-
-# Manual blacklist file
-manual_blacklist_file = ${paths:data_dir}/manual_blacklist.txt
+# Full file paths (directory + filename via interpolation)
+blacklist_ipv4_file = ${paths:data_subdir}/${data_files:blacklist_ipv4_filename}
+blacklist_ipv6_file = ${paths:data_subdir}/${data_files:blacklist_ipv6_filename}
+prelogin_bruteforce_file = ${paths:data_subdir}/${data_files:prelogin_bruteforce_filename}
+whitelist_file = ${paths:data_subdir}/${data_files:whitelist_filename}
+manual_blacklist_file = ${paths:data_subdir}/${data_files:manual_blacklist_filename}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [state_files] - State and Database Files
+# [state_files] - State and Database Files (organized in state/ subdirectory)
 # ═══════════════════════════════════════════════════════════════════════════
 [state_files]
 
-# State tracking file (stores last processed log positions)
-state_file = ${paths:state_dir}/state.json
+# Configurable filenames
+state_filename = state.json
+database_filename = blacklist.db
+nftables_event_log_filename = nftables_events.jsonl
 
-# SQLite database file (if database backend is enabled)
-database_path = ${paths:state_dir}/blacklist.db
+# Full file paths (directory + filename via interpolation)
+state_file = ${paths:state_subdir}/${state_files:state_filename}
+database_path = ${paths:state_subdir}/${state_files:database_filename}
+nftables_event_log = ${paths:state_subdir}/${state_files:nftables_event_log_filename}
 
-# Backup directory
-backup_dir = ${paths:state_dir}/backups
+# Backup directory (all backup files stored here)
+backup_dir = ${paths:backup_subdir}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -217,18 +232,22 @@ backup_compress_age_days = 1
 # ═══════════════════════════════════════════════════════════════════════════
 [ipinfo]
 
-# IPInfo.io API token file location
-# Get a token at: https://ipinfo.io/signup
-token_file = ${paths:config_dir}/ipinfo_token.txt
+# Configurable filenames
+token_filename = ipinfo_token.txt
+results_filename = ipinfo_results.json
+csv_cache_filename = ipinfo_results_legacy.csv
 
-# Cache directory for geolocation results
-cache_dir = ${paths:state_dir}/ipinfo_cache
+# IPInfo.io API token file location (Get a token at: https://ipinfo.io/signup)
+token_file = ${paths:config_dir}/${ipinfo:token_filename}
 
-# JSON results file (primary cache)
-results_file = ${paths:state_dir}/ipinfo_results.json
+# Cache directory for geolocation results (in cache/ subdirectory)
+cache_dir = ${paths:cache_subdir}/ipinfo_cache
 
-# CSV cache file (legacy format support)
-csv_cache_file = ${paths:state_dir}/ipinfo_results_legacy.csv
+# JSON results file (primary cache, in state/ subdirectory)
+results_file = ${paths:state_subdir}/${ipinfo:results_filename}
+
+# CSV cache file (legacy format support, in state/ subdirectory)
+csv_cache_file = ${paths:state_subdir}/${ipinfo:csv_cache_filename}
 
 # Batch service interval (seconds between iterations when running as daemon)
 batch_interval = 3600
@@ -269,7 +288,7 @@ fail2ban_pattern = inet f2b-table addr-set-*
 
 # Enable shadow event log for NFTables operations (JSONL format)
 # This creates an append-only audit trail without affecting core functionality
-# Log location: ${paths:state_dir}/nftables_events.jsonl
+# Log location: Configured in [state_files] nftables_event_log
 # Default: false (disabled)
 nftables_event_log_enabled = false
 

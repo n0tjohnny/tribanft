@@ -122,7 +122,7 @@ result = DetectionResult(
 
 Enhanced blacklist files with comprehensive metadata for forensic analysis.
 
-**Location**: `~/.local/share/tribanft/blacklist_ipv4.txt`, `blacklist_ipv6.txt`
+**Location**: `~/.local/share/tribanft/data/blacklist_ipv4.txt`, `blacklist_ipv6.txt` (v2.9.0+, organized structure)
 
 **Structure**:
 

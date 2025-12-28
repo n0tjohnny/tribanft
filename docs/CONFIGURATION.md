@@ -38,29 +38,60 @@ export TRIBANFT_DATA_DIR="/custom/path"
 | Option | Default | Description |
 |--------|---------|-------------|
 | data_dir | `~/.local/share/tribanft` | Base directory for all data |
-| state_dir | `${data_dir}` | State files location |
+| state_dir | `${data_dir}` | State files location (legacy, deprecated) |
 | project_dir | `${data_dir}/bruteforce_detector` | Project code directory |
+| **data_subdir** | `${data_dir}/data` | **Firewall data files directory (v2.9.0+)** |
+| **state_subdir** | `${data_dir}/state` | **Runtime state files directory (v2.9.0+)** |
+| **cache_subdir** | `${data_dir}/cache` | **Temporary cache directory (v2.9.0+)** |
+| **logs_subdir** | `${data_dir}/logs` | **Application logs directory (v2.9.0+)** |
+| **backup_subdir** | `${data_dir}/backups` | **Backup files directory (v2.9.0+)** |
+
+**Organized Directory Structure (v2.9.0+)**:
+```
+~/.local/share/tribanft/
+├── config.conf
+├── data/           # Firewall lists (0o755)
+├── state/          # Runtime state (0o750)
+├── cache/          # Temporary cache (0o755)
+├── logs/           # Application logs (0o750)
+└── backups/        # All backups (0o750)
+```
 
 **Common overrides**:
 ```ini
 [paths]
 data_dir = /var/lib/tribanft
-state_dir = /var/lib/tribanft/state
+data_subdir = ${data_dir}/data
+state_subdir = ${data_dir}/state
+logs_subdir = ${data_dir}/logs
 ```
+
+**Auto-migration**: Existing installations automatically migrate to organized structure on first v2.9.0+ startup
 
 ### [logs] - Log File Paths
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| syslog_path | `/var/log/syslog` | System log file |
-| mssql_errorlog_path | `/var/opt/mssql/log/errorlog` | MSSQL error log |
+| **app_log_filename** | `tribanft.log` | **Application log filename (v2.9.0+)** |
+| **app_log_path** | `${paths:logs_subdir}/tribanft.log` | **Application log full path (v2.9.0+)** |
+| **log_max_bytes** | `10485760` | **Max log file size (10MB, v2.9.0+)** |
+| **log_backup_count** | `5` | **Number of rotated logs to keep (v2.9.0+)** |
+| syslog_path | `/var/log/syslog` | System log file to monitor |
+| mssql_errorlog_path | `/var/opt/mssql/log/errorlog` | MSSQL error log to monitor |
 | apache_access_log_path | Not set | Apache access log (optional) |
 | nginx_access_log_path | Not set | Nginx access log (optional) |
+
+**Log Rotation (v2.9.0+)**:
+- Automatic rotation when log reaches `log_max_bytes`
+- Old logs compressed with gzip (90% space savings)
+- Example: `tribanft.log` → `tribanft.log.1` → `tribanft.log.2.gz`
 
 Add custom log paths:
 ```ini
 [logs]
 my_app_log_path = /var/log/myapp.log
+log_max_bytes = 20971520  # 20MB
+log_backup_count = 10     # Keep 10 rotated files
 ```
 
 ### [features] - Detection Toggles
@@ -103,20 +134,55 @@ enable_nftables_update = true  # Active blocking
 sudo scripts/setup_nftables.sh
 ```
 
+### [data_files] - Firewall Data Files (v2.9.0+)
+
+Configurable filenames and paths for firewall lists. Filenames separated from paths for full user control.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| blacklist_ipv4_filename | `blacklist_ipv4.txt` | IPv4 blacklist filename |
+| blacklist_ipv6_filename | `blacklist_ipv6.txt` | IPv6 blacklist filename |
+| whitelist_filename | `whitelist_ips.txt` | Whitelist filename |
+| manual_blacklist_filename | `manual_blacklist.txt` | Manual blacklist filename |
+| prelogin_bruteforce_filename | `prelogin-bruteforce-ips.txt` | Prelogin attacks filename |
+| blacklist_ipv4_file | `${paths:data_subdir}/${data_files:blacklist_ipv4_filename}` | IPv4 blacklist full path |
+| blacklist_ipv6_file | `${paths:data_subdir}/${data_files:blacklist_ipv6_filename}` | IPv6 blacklist full path |
+| whitelist_file | `${paths:data_subdir}/${data_files:whitelist_filename}` | Whitelist full path |
+
+**Customization**:
+```ini
+[data_files]
+blacklist_ipv4_filename = my-custom-blacklist-v4.txt
+blacklist_ipv4_file = ${paths:data_subdir}/${data_files:blacklist_ipv4_filename}
+```
+
+### [state_files] - Runtime State Files (v2.9.0+)
+
+Configurable filenames and paths for runtime state data.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| state_filename | `state.json` | State file filename |
+| database_filename | `blacklist.db` | SQLite database filename |
+| nftables_event_log_filename | `nftables_events.jsonl` | NFTables events log filename |
+| state_file | `${paths:state_subdir}/${state_files:state_filename}` | State file full path |
+| database_path | `${paths:state_subdir}/${state_files:database_filename}` | Database full path |
+| nftables_event_log | `${paths:state_subdir}/${state_files:nftables_event_log_filename}` | Events log full path |
+| backup_dir | `${paths:backup_subdir}` | Backups directory |
+
 ### [storage] - Data Storage
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | use_database | `false` | Use SQLite database (recommended for >1000 IPs) |
 | sync_to_file | `true` | Keep text files synced with database |
-| database_path | `${data_dir}/blacklist.db` | SQLite database path |
-| blacklist_ipv4_path | `${data_dir}/blacklist_ipv4.txt` | IPv4 text file |
-| blacklist_ipv6_path | `${data_dir}/blacklist_ipv6.txt` | IPv6 text file |
 
 **Recommendations**:
 - Small deployments (<1000 IPs): `use_database = false`
 - Large deployments (>1000 IPs): `use_database = true`
 - Maximum performance: `use_database = true, sync_to_file = false`
+
+**Note**: File paths configured in [data_files] and [state_files] sections (v2.9.0+)
 
 ### [performance] - Backup & Performance
 
@@ -175,6 +241,12 @@ See: `docs/PLUGIN_DEVELOPMENT.md`
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| token_filename | `ipinfo_token.txt` | IPInfo token filename (v2.9.0+) |
+| results_filename | `ipinfo_results.json` | IPInfo results filename (v2.9.0+) |
+| csv_cache_filename | `ipinfo_results_legacy.csv` | Legacy CSV cache filename (v2.9.0+) |
+| token_file | `${paths:config_dir}/ipinfo_token.txt` | Token file full path (v2.9.0+) |
+| cache_dir | `${paths:cache_subdir}/ipinfo_cache` | IPInfo cache directory (v2.9.0+) |
+| results_file | `${paths:state_subdir}/${ipinfo:results_filename}` | Results file full path (v2.9.0+) |
 | daily_limit | `2000` | IPInfo.io daily API limit |
 | rate_limit_per_minute | `100` | Rate limit per minute |
 
@@ -186,7 +258,8 @@ See: `docs/PLUGIN_DEVELOPMENT.md`
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| whitelist_path | `${data_dir}/whitelist_ips.txt` | Whitelist file path |
+| whitelist_filename | `whitelist_ips.txt` | Whitelist filename (v2.9.0+) |
+| whitelist_file | `${paths:data_subdir}/${whitelist:whitelist_filename}` | Whitelist full path (v2.9.0+) |
 
 **Add whitelisted IPs**:
 ```bash
@@ -264,7 +337,48 @@ sudo systemctl status tribanft
 
 ---
 
-## Migration: File → Database
+## Migrations
+
+### Migration: Organized Directory Structure (v2.9.0+)
+
+**Automatic migration** on first startup after upgrading to v2.9.0+:
+
+**What happens**:
+1. System detects legacy flat directory structure
+2. Creates timestamped backup tarball: `tribanft_pre_migration_backup_TIMESTAMP.tar.gz`
+3. Creates organized subdirectories: `data/`, `state/`, `cache/`, `logs/`, `backups/`
+4. Moves files to appropriate locations based on type
+5. Renames old config backups to new format: `config.conf_TIMESTAMP.backup`
+6. Logs migration summary with file counts
+7. Creates marker file: `.migrated_to_organized_structure`
+
+**Files moved**:
+- Blacklist/whitelist files → `data/`
+- State files (state.json, blacklist.db) → `state/`
+- Cache files (ipinfo_cache/) → `cache/`
+- Log files (tribanft.log*) → `logs/`
+- All backup files → `backups/`
+
+**Preserved**:
+- `config.conf` stays in base directory
+- User's `scripts/` and `systemd/` directories unchanged
+
+**Rollback**:
+```bash
+# If issues occur, restore from backup tarball
+cd ~/.local/share/tribanft
+tar -xzf tribanft_pre_migration_backup_TIMESTAMP.tar.gz
+rm .migrated_to_organized_structure
+```
+
+**Permissions**:
+- data/ (0o755) - Public firewall lists
+- state/ (0o750) - Sensitive runtime state
+- cache/ (0o755) - Public cache data
+- logs/ (0o750) - May contain sensitive info
+- backups/ (0o750) - Critical backup data
+
+### Migration: File → Database
 
 ```bash
 # Edit config
@@ -319,16 +433,23 @@ Complete configuration for initial deployment and tuning. Logging only, no firew
 data_dir = ~/.local/share/tribanft
 state_dir = ${data_dir}
 project_dir = ${data_dir}/bruteforce_detector
+data_subdir = ${paths:data_dir}/data
+state_subdir = ${paths:data_dir}/state
+cache_subdir = ${paths:data_dir}/cache
+logs_subdir = ${paths:data_dir}/logs
+backup_subdir = ${paths:data_dir}/backups
 
 [logs]
 syslog_path = /var/log/syslog
 mssql_errorlog_path = /var/opt/mssql/log/errorlog
+app_log_filename = tribanft.log
+app_log_path = ${paths:logs_subdir}/${logs:app_log_filename}
+log_max_bytes = 10485760
+log_backup_count = 5
 
 [storage]
 use_database = false
 sync_to_file = true
-blacklist_ipv4_path = ${paths:data_dir}/blacklist_ipv4.txt
-blacklist_ipv6_path = ${paths:data_dir}/blacklist_ipv6.txt
 
 [features]
 enable_prelogin_detection = true
@@ -371,19 +492,25 @@ Complete configuration for production deployment with NFTables integration.
 data_dir = /var/lib/tribanft
 state_dir = ${data_dir}/state
 project_dir = ${data_dir}/bruteforce_detector
+data_subdir = ${paths:data_dir}/data
+state_subdir = ${paths:data_dir}/state
+cache_subdir = ${paths:data_dir}/cache
+logs_subdir = ${paths:data_dir}/logs
+backup_subdir = ${paths:data_dir}/backups
 
 [logs]
 syslog_path = /var/log/syslog
 mssql_errorlog_path = /var/opt/mssql/log/errorlog
 apache_access_log_path = /var/log/apache2/access.log
 nginx_access_log_path = /var/log/nginx/access.log
+app_log_filename = tribanft.log
+app_log_path = ${paths:logs_subdir}/${logs:app_log_filename}
+log_max_bytes = 10485760
+log_backup_count = 5
 
 [storage]
 use_database = true
 sync_to_file = true
-database_path = ${paths:data_dir}/blacklist.db
-blacklist_ipv4_path = ${paths:data_dir}/blacklist_ipv4.txt
-blacklist_ipv6_path = ${paths:data_dir}/blacklist_ipv6.txt
 
 [features]
 enable_prelogin_detection = true
@@ -461,6 +588,11 @@ Optimized configuration for high-traffic environments (>10k IPs, multiple servic
 data_dir = /var/lib/tribanft
 state_dir = ${data_dir}/state
 project_dir = ${data_dir}/bruteforce_detector
+data_subdir = ${paths:data_dir}/data
+state_subdir = ${paths:data_dir}/state
+cache_subdir = ${paths:data_dir}/cache
+logs_subdir = ${paths:data_dir}/logs
+backup_subdir = ${paths:data_dir}/backups
 
 [logs]
 syslog_path = /var/log/syslog
@@ -468,11 +600,14 @@ mssql_errorlog_path = /var/opt/mssql/log/errorlog
 apache_access_log_path = /var/log/apache2/access.log
 nginx_access_log_path = /var/log/nginx/access.log
 dns_log_path = /var/log/named/query.log
+app_log_filename = tribanft.log
+app_log_path = ${paths:logs_subdir}/${logs:app_log_filename}
+log_max_bytes = 20971520
+log_backup_count = 10
 
 [storage]
 use_database = true
 sync_to_file = false
-database_path = ${paths:data_dir}/blacklist.db
 
 [features]
 enable_prelogin_detection = true

@@ -7,6 +7,178 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.0] - 2025-12-27
+
+**Major Release: Organized Directory Structure with Automatic Migration**
+
+This release introduces a fully organized directory structure to replace the flat file layout, improving maintainability and reducing clutter (no more 40+ config backup files mixed with data). All existing installations automatically migrate on first startup with full backup protection.
+
+**Key Changes**:
+- Organized subdirectories: `data/`, `state/`, `cache/`, `logs/`, `backups/`
+- Log rotation with gzip compression (90% space savings)
+- Fully configurable filenames and paths (no hardcoded values)
+- Automatic one-time migration with tarball backup
+- Security hardening: path traversal prevention, explicit permission enforcement
+
+**User Impact**: Zero manual intervention required. Migration is automatic, safe, and reversible.
+
+#### Documentation
+- README.md improvements (48% reduction: 367 → 189 lines)
+  - Fixed broken QUICK_DEPLOY.md link (now DEPLOYMENT_GUIDE.md)
+  - Removed all version-specific markers (NEW v2.X)
+  - Condensed duplicate sections (Performance, Key Features, Configuration)
+  - Converted Requirements and Troubleshooting to table format
+  - Simplified Attack Detection to summary table with doc link
+  - Condensed verbose marketing prose in Overview section
+  - Added Security disclosure section
+  - All sections now follow "reference, don't repeat" pattern
+
+---
+
+### Added
+
+#### Organized Directory Structure
+
+**New Configuration Sections** (config.conf.template):
+- **`[paths]`** - Organized subdirectory configuration
+  - New subdirectory variables: `data_subdir`, `state_subdir`, `cache_subdir`, `logs_subdir`, `backup_subdir`
+  - Full path interpolation support: `${paths:data_subdir}/${data_files:blacklist_ipv4_filename}`
+- **`[data_files]`** - Firewall data file configuration (NEW section)
+  - Separated filenames from paths for full user configurability
+  - Configurable filenames: `blacklist_ipv4_filename`, `blacklist_ipv6_filename`, `whitelist_filename`, etc.
+  - Full path composition via interpolation
+- **`[state_files]`** - Runtime state file configuration (NEW section)
+  - Configurable filenames: `state_filename`, `database_filename`, `nftables_event_log_filename`
+  - Backup directory path: `backup_dir`
+- **`[logs]`** - Log rotation configuration
+  - New fields: `app_log_filename`, `app_log_path`, `log_max_bytes` (10MB default), `log_backup_count` (5 files default)
+- **`[ipinfo]`** - Organized cache paths
+  - Configurable filenames for token, results, and legacy CSV cache
+  - Cache directory now in organized `cache/` subdirectory
+- **`[whitelist]`** - Whitelist file configuration
+  - Configurable filename and path via interpolation
+
+**Implementation Files**:
+
+- **bruteforce_detector/utils/migration.py** - Automatic one-time migration system
+  - Detects legacy flat structure and migrates to organized subdirectories
+  - Creates full tarball backup before migration
+  - Moves files to appropriate subdirectories based on type
+  - Renames old config backups to new format: `config.conf_TIMESTAMP.backup`
+  - Security: Path validation, atomic operations, permission enforcement, file count verification
+  - Creates marker file `.migrated_to_organized_structure` to prevent re-migration
+  - Integrated into config.py startup sequence (runs automatically on first v2.9.0+ boot)
+
+- **bruteforce_detector/utils/logging.py** - Log rotation with gzip compression
+  - Replaced FileHandler with RotatingFileHandler
+  - Custom rotator compresses old logs with gzip (90% space savings)
+  - Configurable via `log_max_bytes` and `log_backup_count` in config.conf
+  - Example: tribanft.log → tribanft.log.1 → tribanft.log.2.gz
+
+### Changed
+
+#### Configuration System Enhancements
+- **bruteforce_detector/config.py** - Added subdirectory support and security validation
+  - New fields: `data_subdir`, `state_subdir`, `cache_subdir`, `logs_subdir`, `backup_subdir`
+  - New fields: `log_max_bytes`, `log_backup_count`
+  - **Security**: Added `_validate_subdir()` function to prevent path traversal attacks
+  - **Security**: Explicit `chmod()` after `mkdir()` for guaranteed permissions (not affected by umask)
+  - Permission model: 0o755 (public data), 0o750 (sensitive metadata/logs), 0o640 (backups)
+  - Updated `ensure_directories()` to create organized subdirectories with proper permissions
+  - Added helper methods: `get_backup_dir()`, `get_logs_dir()`
+  - Startup sequence: migration → config sync → load config → ensure directories
+
+- **bruteforce_detector/config_sync.py** - Config backups organized in backups/ subdirectory
+  - Changed backup location from `config.conf.backup-TIMESTAMP` to `backups/config.conf_TIMESTAMP.backup`
+  - **Security**: Explicit `chmod(0o750)` on backup directory, `chmod(0o640)` on backup files
+  - Follows organized structure (v2.9.0+)
+
+### Security
+
+#### Path Traversal Prevention
+- All subdirectory paths validated with `Path.resolve()` and `relative_to(base_dir)`
+- Rejects configured paths outside base directory with fallback to safe defaults
+- Prevents malicious config.conf from writing to arbitrary filesystem locations
+
+#### Permission Enforcement
+- Fixed mkdir behavior: explicit `chmod()` after `mkdir(parents=True)` for guaranteed permissions
+- Reason: `mkdir(mode=X)` doesn't guarantee permissions with `parents=True` due to umask influence
+- Applied to all subdirectories and backup files
+
+### Migration Notes
+
+**Automatic Migration**: On first startup after upgrading to v2.9.0+:
+1. System detects legacy flat structure
+2. Creates timestamped tarball backup in data directory
+3. Creates organized subdirectories with proper permissions
+4. Moves files to appropriate locations (data/, state/, cache/, logs/, backups/)
+5. Preserves user's scripts/ and systemd/ directories
+6. Logs migration summary with file counts
+
+**New Directory Structure**:
+```
+~/.local/share/tribanft/
+├── config.conf                      # Main config file
+├── data/                            # Firewall data files (0o755)
+│   ├── blacklist_ipv4.txt
+│   ├── blacklist_ipv6.txt
+│   ├── whitelist_ips.txt
+│   ├── manual_blacklist.txt
+│   └── prelogin-bruteforce-ips.txt
+├── state/                           # Runtime state (0o750)
+│   ├── state.json
+│   ├── state.bak
+│   ├── blacklist.db
+│   └── nftables_events.jsonl
+├── cache/                           # Temporary cache (0o755)
+│   ├── ipinfo_cache/
+│   └── geo-health-state.txt
+├── logs/                            # Application logs (0o750, rotated)
+│   ├── tribanft.log
+│   ├── tribanft.log.1
+│   └── tribanft.log.2.gz
+├── backups/                         # All backup files (0o750)
+│   ├── config.conf_*.backup
+│   ├── blacklist_*.backup
+│   └── tribanft_pre_migration_backup_*.tar.gz
+├── scripts/                         # User scripts (preserved)
+└── systemd/                         # Systemd overrides (preserved)
+```
+
+**Rollback**: Full backup tarball created before migration for disaster recovery
+
+### Upgrade Notes
+
+**For existing installations**:
+1. **Automatic Migration** - No manual action required. Migration runs automatically on first v2.9.0+ startup
+2. **Backup Created** - Full tarball backup created before migration: `tribanft_pre_migration_backup_TIMESTAMP.tar.gz`
+3. **Config Updated** - config.conf automatically synced with new template sections
+4. **Zero Downtime** - Service continues operating during and after migration
+5. **Rollback Available** - Full backup can restore previous state if needed
+
+**For new installations**:
+- Organized directory structure created automatically
+- No migration needed
+
+**Breaking Changes**: None - All changes backward compatible via automatic migration
+
+**Files Modified**:
+- `config.conf.template` (NEW sections: data_files, state_files, updated: paths, logs, ipinfo, whitelist)
+- `bruteforce_detector/config.py` (TIER_1)
+- `bruteforce_detector/config_sync.py` (TIER_2)
+- `bruteforce_detector/utils/logging.py` (TIER_2)
+- `bruteforce_detector/utils/migration.py` (NEW)
+
+**Documentation Updated**:
+- `docs/CONFIGURATION.md` (comprehensive update)
+- `docs/DEPLOYMENT_GUIDE.md`
+- `docs/MONITORING_AND_TUNING.md`
+- `docs/COMMANDS.md`
+- `docs/API_REFERENCE.md`
+- `README.md`
+
+---
+
 ## [2.8.4] - 2025-12-27
 
 ### Fixed

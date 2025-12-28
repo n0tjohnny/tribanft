@@ -106,9 +106,9 @@ sudo nft list set inet filter blacklist_ipv6
 **Whitelist priority:** Whitelisted IPs never blocked regardless of detections
 
 **Default paths (XDG):**
-- Data: `~/.local/share/tribanft/`
+- Data: `~/.local/share/tribanft/` (organized in subdirs: data/, state/, cache/, logs/, backups/ v2.9.0+)
 - Config: `~/.local/share/tribanft/config.conf`
-- State: `~/.local/state/tribanft/`
+- State: `~/.local/state/tribanft/` (legacy, deprecated in v2.9.0+)
 
 **Common fixes:**
 - Permission denied: `sudo usermod -a -G adm $USER`
