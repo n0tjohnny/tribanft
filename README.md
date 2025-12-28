@@ -20,8 +20,6 @@
 
 TribanFT combines behavioral attack detection with threat intelligence. Every blocked IP includes geolocation, attack timeline, and correlation across multiple log sources.
 
-**Core Capabilities**: Multi-layer detection (L3/L4 + L7), zero-config validation, unified platform for NFTables/CrowdSec/Fail2Ban.
-
 ---
 
 ## Attack Detection
