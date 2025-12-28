@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.1] - 2025-12-28
+
+### Fixed
+
+- **Configuration Parser**: Fixed crash when config.conf contains inline comments
+  - `UnboundLocalError: local variable 'logger' referenced before assignment` in `config.py:501`
+  - `ValueError: invalid literal for int() with base 10: '10485760 # comment'`
+  - Root cause: `logger` not initialized in `resolve_all_paths()` validator; inline comments not stripped before int() parsing
+  - Fix: Initialize logger at `config.py:397`; strip inline comments in `load_config_file()` at lines 102, 114
+  - Impact: Service failed to start with default config.conf.template on fresh installs
+  - File: `bruteforce_detector/config.py`
+
+---
+
 ## [2.9.0] - 2025-12-27
 
 **Major Release: Organized Directory Structure with Automatic Migration**

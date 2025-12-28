@@ -98,6 +98,8 @@ def load_config_file() -> dict:
     # Paths section -> TRIBANFT_* environment variables
     if parser.has_section('paths'):
         for key, value in parser.items('paths'):
+            # Strip inline comments (anything after #)
+            value = value.split('#')[0].strip()
             # Expand tilde in paths
             expanded_value = os.path.expanduser(value)
             config[f'TRIBANFT_{key.upper()}'] = expanded_value
@@ -108,6 +110,8 @@ def load_config_file() -> dict:
                     'nftables', 'advanced', 'realtime', 'threat_intelligence']:
         if parser.has_section(section):
             for key, value in parser.items(section):
+                # Strip inline comments (anything after #)
+                value = value.split('#')[0].strip()
                 # Expand tilde in paths
                 expanded_value = os.path.expanduser(value)
                 env_key = f'BFD_{key.upper()}'
@@ -393,6 +397,9 @@ class DetectorConfig(BaseSettings):
     @model_validator(mode='after')
     def resolve_all_paths(self):
         """Resolve all file paths using configuration sources"""
+        # Initialize logger for this validator
+        logger = logging.getLogger(__name__)
+
         # Load config.conf file
         config_dict = load_config_file()
 

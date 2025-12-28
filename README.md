@@ -40,9 +40,9 @@ See [PARSER_EVENTTYPES_MAPPING.md](docs/PARSER_EVENTTYPES_MAPPING.md) for comple
 
 ```bash
 # Download latest release
-wget https://github.com/n0tjohnny/tribanft/archive/v2.9.0.tar.gz
-tar -xzf v2.9.0.tar.gz
-cd tribanft-2.9.0
+wget https://github.com/n0tjohnny/tribanft/archive/v2.9.1.tar.gz
+tar -xzf v2.9.1.tar.gz
+cd tribanft-2.9.1
 
 # Automated installation (one command)
 ./install.sh
@@ -52,7 +52,7 @@ sudo systemctl status tribanft
 sudo journalctl -u tribanft -f
 ```
 
-**v2.9.0 Changes**: Organized directory structure with automatic migration (backups stored in `backups/`, logs in `logs/` with rotation)
+**v2.9.1 Changes**: Config parser bug fix; organized directory structure with automatic migration (backups stored in `backups/`, logs in `logs/` with rotation)
 
 **That's it.** TribanFT starts detecting attacks immediately using sensible defaults.
 
