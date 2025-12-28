@@ -560,9 +560,16 @@ class BlacklistManager:
                         elif new_last_seen:
                             existing_entry['last_seen'] = new_last_seen
 
-                        # Increment event count (accumulate total events seen)
-                        # Note: This counts total detection events, not unique incidents
-                        existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_info.get('event_count', 0)
+                        # EVENT COUNT: Prevent double-increment when using database
+                        # FIX #15: Database UPSERT already increments via "event_count = event_count + excluded.event_count"
+                        # If we also increment here, counts grow exponentially (file layer + DB layer)
+                        if self.config.use_database:
+                            # Database mode: Pass only NEW event count for this detection
+                            # Database UPSERT will handle accumulation: current + new
+                            existing_entry['event_count'] = new_info.get('event_count', 0)
+                        else:
+                            # File-only mode: Must manually accumulate (no database to track)
+                            existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_info.get('event_count', 0)
 
                         # Merge event_types (union of both sets)
                         existing_types = set(existing_entry.get('event_types', []))

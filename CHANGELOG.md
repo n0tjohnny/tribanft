@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.8.4] - 2025-12-27
+
+### Fixed
+
+#### Critical: Event Count Exponential Growth (FIX #15)
+- **bruteforce_detector/managers/blacklist.py** - Fixed double-increment causing astronomical event counts
+  - Added conditional logic at lines 563-572 to prevent duplicate accumulation
+  - Root cause: Both file layer AND database layer were incrementing event_count
+  - Impact: Event counts reached 3.47e+41 due to exponential growth on each detection cycle
+  - Fix: When `use_database=true`, pass only NEW events to database (let UPSERT handle accumulation)
+  - File-only mode: Unchanged, continues manual accumulation for backwards compatibility
+
+### Added
+
+- **scripts/recover_event_counts_safe.py** - Recovery tool for corrupted event counts with safety checks
+
+### Changed
+
+- **docs/API_REFERENCE.md** - Added "Blacklist File Format" section with EventTypes documentation
+- **docs/COMMANDS.md** - Updated command descriptions to mention attack types visibility
+
+### Technical Details
+
+**Bug Flow (BEFORE):** 5 → 15 (file+db) → 35 → 70 (exponential)
+**Fixed Flow (AFTER):** 5 → 10 → 15 → 20 (linear, correct)
+
+### Notes
+
+Critical bugfix for database mode users. Event counts normalize on next detection cycle. Corrupted data recoverable via `scripts/recover_event_counts_safe.py`.
+
+---
+
 ## [2.8.3] - 2025-12-27
 
 ### Fixed
