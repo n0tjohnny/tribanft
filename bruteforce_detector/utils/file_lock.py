@@ -47,7 +47,7 @@ def file_lock(lock_path: Path, timeout: int = 30, description: str = "operation"
         FileLockError: If lock cannot be acquired within timeout
         
     Example:
-        >>> lock_file = Path("/var/lib/tribanft/.ipinfo.lock")
+        >>> lock_file = Path("${paths:data_dir}/.ipinfo.lock")
         >>> with file_lock(lock_file, timeout=30, description="cache update"):
         ...     # Critical section - modify cache files
         ...     update_cache()
@@ -140,7 +140,7 @@ def cleanup_stale_lock(lock_path: Path, max_age_seconds: int = 300) -> bool:
         True if lock was cleaned up, False otherwise
         
     Example:
-        >>> lock_file = Path("/var/lib/tribanft/.ipinfo.lock")
+        >>> lock_file = Path("${paths:data_dir}/.ipinfo.lock")
         >>> if cleanup_stale_lock(lock_file):
         ...     logger.info("Cleaned up stale lock file")
     """
@@ -199,7 +199,7 @@ class FileLockContext:
     with consistent configuration.
     
     Example:
-        >>> cache_lock = FileLockContext("/var/lib/tribanft/.cache.lock", timeout=30)
+        >>> cache_lock = FileLockContext("${paths:data_dir}/.cache.lock", timeout=30)
         >>> with cache_lock("update results"):
         ...     save_results()
         >>> with cache_lock("update stats"):

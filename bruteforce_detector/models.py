@@ -218,7 +218,7 @@ class ProcessingState:
     """
     Tracks processing state between detection runs.
 
-    Persisted to disk (/var/lib/tribanft/state.json) to enable
+    Persisted to disk (${paths:state_subdir}/state.json) to enable
     incremental processing - only parse logs since last run.
 
     Attributes:

@@ -119,25 +119,29 @@ class WhitelistManager:
         with self._reload_lock:
             # Check individual IPs (faster)
             if ip in self.individual_ips:
+                self.logger.debug(f"is_whitelisted: {ip} is whitelisted (individual IP)")
                 return True
 
             # Check networks
             for network in self.networks:
                 if ip in network:
+                    self.logger.debug(f"is_whitelisted: {ip} is whitelisted (network {network})")
                     return True
 
+            self.logger.debug(f"is_whitelisted: {ip} is NOT whitelisted")
             return False
     
     def add_to_whitelist(self, ip_or_network: str) -> bool:
         """
         Add IP or network to whitelist and persist to file.
-        
+
         Args:
             ip_or_network: IP address or CIDR notation network
-            
+
         Returns:
             True if successfully added, False on error
         """
+        self.logger.debug(f"add_to_whitelist: Adding {ip_or_network}")
         try:
             if '/' in ip_or_network:
                 if not validate_cidr(ip_or_network):
@@ -154,24 +158,27 @@ class WhitelistManager:
             # Append to file
             with open(self.config.whitelist_file, 'a') as f:
                 f.write(f"{ip_or_network}\n")
-            
+
             self.logger.info(f"Added {ip_or_network} to whitelist")
+            self.logger.debug(f"add_to_whitelist: Successfully added {ip_or_network}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Error adding to whitelist: {e}")
+            self.logger.debug(f"add_to_whitelist: Failed to add {ip_or_network}: {e}")
             return False
     
     def remove_from_whitelist(self, ip_or_network: str) -> bool:
         """
         Remove IP or network from whitelist.
-        
+
         Args:
             ip_or_network: IP address or CIDR notation to remove
-            
+
         Returns:
             True if removed, False if not found or error
         """
+        self.logger.debug(f"remove_from_whitelist: Removing {ip_or_network}")
         try:
             removed = False
             
@@ -207,17 +214,21 @@ class WhitelistManager:
                     # Atomic rename (all-or-nothing semantics)
                     os.replace(temp_path, self.config.whitelist_file)
                     self.logger.info(f"Removed {ip_or_network} from whitelist")
+                    self.logger.debug(f"remove_from_whitelist: Successfully removed {ip_or_network}")
 
                 except Exception as e:
                     # Clean up temp file on error
                     if os.path.exists(temp_path):
                         os.unlink(temp_path)
                     raise
-            
+            else:
+                self.logger.debug(f"remove_from_whitelist: {ip_or_network} not found in whitelist")
+
             return removed
-            
+
         except Exception as e:
             self.logger.error(f"Error removing from whitelist: {e}")
+            self.logger.debug(f"remove_from_whitelist: Failed to remove {ip_or_network}: {e}")
             return False
     
     def get_whitelist_entries(self) -> List[str]:

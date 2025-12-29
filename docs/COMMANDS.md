@@ -52,7 +52,6 @@
 | `--list-backups` | `<FILE>` | List available backups for file with timestamps and sizes (e.g., blacklist_ipv4.txt) |
 | `--restore-backup` | `<BACKUP>` | Restore from specific backup file (requires --restore-target for safety) |
 | `--restore-target` | `<TARGET>` | Specify target path for backup restoration (prevents accidental overwrites) |
-| `--compress-backups` | - | Compress old uncompressed backups to save storage space (preserves all data) |
 | **Integration** |||
 | `--import-crowdsec-csv` | `<CSV>` | Import CrowdSec CSV data (replaces blacklist with trusted threat intelligence) |
 

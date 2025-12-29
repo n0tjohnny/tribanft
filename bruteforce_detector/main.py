@@ -630,7 +630,6 @@ def main():
     parser.add_argument('--list-backups', type=str, metavar='FILE', help='List available backups for a file (e.g., blacklist_ipv4.txt)')
     parser.add_argument('--restore-backup', type=str, metavar='BACKUP_PATH', help='Restore from a specific backup file')
     parser.add_argument('--restore-target', type=str, metavar='TARGET_PATH', help='Target path for backup restoration (required with --restore-backup)')
-    parser.add_argument('--compress-backups', action='store_true', help='Compress old uncompressed backups to save storage space')
 
     # CrowdSec integration commands
     parser.add_argument('--import-crowdsec-csv', type=str, metavar='CSV_FILE', help='Import and replace blacklist with trusted CrowdSec CSV data')
@@ -731,31 +730,6 @@ def main():
         else:
             print(f"ERROR: Restoration failed")
             sys.exit(1)
-
-    elif args.compress_backups:
-        from bruteforce_detector.utils.backup_manager import get_backup_manager
-        from bruteforce_detector.config import get_config
-
-        config = get_config()
-        backup_mgr = get_backup_manager()
-
-        print(f"Compressing Old Backups")
-        print("=" * 80)
-        print(f"   Backup directory: {config.get_backup_dir()}")
-        print(f"   Compression age threshold: {backup_mgr.compress_age_days} day(s)")
-        print()
-
-        compressed_count, bytes_saved = backup_mgr.compress_old_backups()
-
-        if compressed_count > 0:
-            mb_saved = bytes_saved / 1024 / 1024
-            print()
-            print(f"SUCCESS: Compressed {compressed_count} backups")
-            print(f"Storage saved: {bytes_saved:,} bytes ({mb_saved:.1f} MB)")
-        else:
-            print("INFO: No old uncompressed backups found")
-
-        sys.exit(0)
 
     # Query commands
     elif (args.query_ip or args.query_country or args.query_reason or args.query_attack_type or

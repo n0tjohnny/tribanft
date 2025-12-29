@@ -136,6 +136,7 @@ class BlacklistDatabase:
         Raises:
             sqlite3.OperationalError: If database remains locked after max retries
         """
+        self.logger.debug(f"bulk_add: Adding/updating {len(ips_info)} IP(s)")
         max_retries = 5
         retry_delay = 0.1  # Start with 100ms
 
@@ -147,6 +148,7 @@ class BlacklistDatabase:
                 with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                     with self._query_timer(f"bulk_add({len(ips_info)} IPs)"):
                         # Begin IMMEDIATE transaction to acquire write lock immediately
+                        self.logger.debug(f"bulk_add: Beginning IMMEDIATE transaction (attempt {attempt + 1})")
                         conn.execute("BEGIN IMMEDIATE")
 
                         for ip_str, info in ips_info.items():
@@ -225,9 +227,12 @@ class BlacklistDatabase:
                                 self.logger.warning(f"Skipped {ip_str}: {e}")
                                 continue
 
+                        self.logger.debug(f"bulk_add: Committing transaction with {added} IP(s)")
                         conn.commit()
+                        self.logger.debug(f"bulk_add: Transaction committed successfully")
 
                 # Success - return result
+                self.logger.debug(f"bulk_add: Completed successfully - {added} IP(s) added/updated")
                 return added
 
             except sqlite3.OperationalError as e:
@@ -623,6 +628,7 @@ class BlacklistDatabase:
         Returns:
             True if IP was deleted, False if not found
         """
+        self.logger.debug(f"delete_ip: Deleting {ip_str} from database")
         try:
             with sqlite3.connect(self.db_path, timeout=30) as conn:
                 cursor = conn.cursor()
@@ -631,6 +637,7 @@ class BlacklistDatabase:
                 cursor.execute("SELECT ip FROM blacklist WHERE ip = ?", (ip_str,))
                 if not cursor.fetchone():
                     self.logger.warning(f"IP {ip_str} not found in database")
+                    self.logger.debug(f"delete_ip: {ip_str} not found")
                     return False
 
                 # Delete the IP
@@ -638,8 +645,10 @@ class BlacklistDatabase:
                 conn.commit()
 
                 self.logger.info(f"Deleted {ip_str} from database")
+                self.logger.debug(f"delete_ip: Successfully deleted {ip_str}")
                 return True
 
         except sqlite3.Error as e:
             self.logger.error(f"Database error deleting {ip_str}: {e}")
+            self.logger.debug(f"delete_ip: Failed to delete {ip_str}: {e}")
             return False

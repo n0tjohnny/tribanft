@@ -12,102 +12,112 @@
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [paths] - Directory and File Locations
+# [paths] - Where TribanFT Stores All Its Data
 # ═══════════════════════════════════════════════════════════════════════════
 [paths]
 
-# --- Project Directory ---
-# Root directory where TribanFT is installed
+# Root location where TribanFT is installed
+# Change only if you move the entire TribanFT installation to a different path
 project_dir = ~/.local/share/tribanft
 
-# --- Data Directory ---
-# Stores blacklists, whitelists, and IP intelligence data
+# Main storage location for blacklists, whitelists, and geolocation data
+# Change if you want to move all data to a different disk (e.g., faster SSD)
 data_dir = ~/.local/share/tribanft
 
-# --- Configuration Directory ---
-# Stores configuration files (this file's location)
+# Location of this config file and API tokens
+# Change if you want to store secrets in a different location
 config_dir = ~/.local/share/tribanft
 
-# --- State Directory ---
-# Stores runtime state, database, backups, and logs
+# Location for runtime state, database, and backups
+# Change if you need to separate active data from static storage
 state_dir = ~/.local/share/tribanft
 
-# --- Organized Subdirectories (v2.9.0+) ---
-# Subdirectories for organized file storage (fully configurable)
+# Organized subdirectories for keeping data tidy (don't modify unless reorganizing storage)
 data_subdir = ${paths:data_dir}/data
 state_subdir = ${paths:data_dir}/state
 cache_subdir = ${paths:data_dir}/cache
 logs_subdir = ${paths:data_dir}/logs
 backup_subdir = ${paths:data_dir}/backups
 
-# --- Python Interpreter ---
-# Path to Python 3 interpreter
+# Path to Python 3 interpreter (usually correct on most systems)
 python_bin = /usr/bin/python3
 
-# --- TribanFT Binary ---
-# Path to installed tribanft command
+# Location of the tribanft command after installation
 tribanft_bin = ~/.local/bin/tribanft
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [logs] - Log File Locations
+# [logs] - Where TribanFT Finds Your Server Logs
 # ═══════════════════════════════════════════════════════════════════════════
 [logs]
 
-# System log file (for SSH, FTP, and other auth events)
+# Linux system log file (contains SSH login failures, FTP auth errors, etc.)
+# Change if your system uses a different path or log consolidation tool
 syslog_path = /var/log/syslog
 
-# Microsoft SQL Server error log
+# SQL Server error log (Windows systems only)
+# Not needed on Linux-only deployments
 mssql_error_log_path = /var/opt/mssql/log/errorlog
 
-# Apache access log (for SQL injection and WordPress attack detection)
-# Common paths: /var/log/apache2/access.log (Debian/Ubuntu)
-#               /var/log/httpd/access_log (RedHat/CentOS/Fedora)
+# Apache web server access log (detects SQL injection and WordPress attacks)
+# Debian/Ubuntu: /var/log/apache2/access.log
+# RedHat/CentOS/Fedora: /var/log/httpd/access_log
+# Change if Apache installed in custom location
 apache_access_log_path = /var/log/apache2/access.log
 
-# Nginx access log (for SQL injection and WordPress attack detection)
+# Nginx web server access log (detects SQL injection and WordPress attacks)
+# Change if Nginx logs to a different location
 nginx_access_log_path = /var/log/nginx/access.log
 
-# FTP server log (vsftpd, ProFTPD, Pure-FTPd)
-# Common paths: /var/log/vsftpd.log (vsftpd)
-#               /var/log/proftpd/proftpd.log (ProFTPD)
-#               /var/log/pure-ftpd/pure-ftpd.log (Pure-FTPd)
+# FTP server log (detects failed FTP login attempts)
+# vsftpd: /var/log/vsftpd.log
+# ProFTPD: /var/log/proftpd/proftpd.log
+# Pure-FTPd: /var/log/pure-ftpd/pure-ftpd.log
 ftp_log_path = /var/log/vsftpd.log
 
-# SMTP/Mail server log (Postfix, Sendmail, Exim)
-# Common paths: /var/log/mail.log (Debian/Ubuntu)
-#               /var/log/maillog (RedHat/CentOS/Fedora)
+# Mail server log (SMTP auth failures, spam relay attempts)
+# Debian/Ubuntu: /var/log/mail.log
+# RedHat/CentOS/Fedora: /var/log/maillog
 smtp_log_path = /var/log/mail.log
 
-# DNS server log (BIND9, dnsmasq, Unbound, systemd-resolved)
-# Common paths: /var/log/named/query.log (BIND9)
-#               /var/log/dnsmasq.log (dnsmasq)
-#               /var/log/unbound.log (Unbound)
+# DNS server log (detects DNS tunneling and reconnaissance)
+# BIND9: /var/log/named/query.log
+# dnsmasq: /var/log/dnsmasq.log
+# Unbound: /var/log/unbound.log
 dns_log_path = /var/log/named/query.log
 
-# TribanFT application log (organized in logs subdirectory)
+# TribanFT's own application log (for troubleshooting and audit trail)
 app_log_filename = tribanft.log
 app_log_path = ${paths:logs_subdir}/${logs:app_log_filename}
 
-# Log rotation settings (v2.9.0+)
-log_max_bytes = 10485760      # 10MB per file before rotation
-log_backup_count = 5          # Keep 5 rotated files (auto-compressed with gzip)
+# Automatic log rotation: prevent logs from growing too large
+log_max_bytes = 10485760
+log_backup_count = 5
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [data_files] - Data File Locations (organized in data/ subdirectory)
+# [data_files] - Blacklist and Whitelist File Names
 # ═══════════════════════════════════════════════════════════════════════════
-# File names and paths are fully configurable - change filenames or directories as needed
+# Customize file names only if you want to integrate with other security tools
+# Most users should leave these at their defaults
 [data_files]
 
-# Configurable filenames (change if you want different names)
+# IPv4 blacklist - IPs blocked by the firewall
 blacklist_ipv4_filename = blacklist_ipv4.txt
+
+# IPv6 blacklist - IPv6 addresses blocked by the firewall
 blacklist_ipv6_filename = blacklist_ipv6.txt
+
+# SQL Server attack IPs - from prelogin pattern detection
 prelogin_bruteforce_filename = prelogin-bruteforce-ips.txt
+
+# Whitelist - IPs that should NEVER be blocked (takes priority over blacklist)
 whitelist_filename = whitelist_ips.txt
+
+# Manual blacklist - IPs you explicitly added for blocking
 manual_blacklist_filename = manual_blacklist.txt
 
-# Full file paths (directory + filename via interpolation)
+# Full file paths (automatically constructed from above)
 blacklist_ipv4_file = ${paths:data_subdir}/${data_files:blacklist_ipv4_filename}
 blacklist_ipv6_file = ${paths:data_subdir}/${data_files:blacklist_ipv6_filename}
 prelogin_bruteforce_file = ${paths:data_subdir}/${data_files:prelogin_bruteforce_filename}
@@ -116,396 +126,461 @@ manual_blacklist_file = ${paths:data_subdir}/${data_files:manual_blacklist_filen
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [state_files] - State and Database Files (organized in state/ subdirectory)
+# [state_files] - Runtime Database and State File Names
 # ═══════════════════════════════════════════════════════════════════════════
+# These track detection progress and firewall operations (don't modify unless needed)
 [state_files]
 
-# Configurable filenames
+# Tracks parsing progress to avoid re-processing old log entries
 state_filename = state.json
+
+# SQLite database storing blacklist history and metadata
 database_filename = blacklist.db
+
+# Audit log of all firewall rule changes (for compliance/forensics)
 nftables_event_log_filename = nftables_events.jsonl
 
-# Full file paths (directory + filename via interpolation)
+# Full file paths (automatically constructed)
 state_file = ${paths:state_subdir}/${state_files:state_filename}
 database_path = ${paths:state_subdir}/${state_files:database_filename}
 nftables_event_log = ${paths:state_subdir}/${state_files:nftables_event_log_filename}
 
-# Backup directory (all backup files stored here)
+# Directory where backups are automatically stored before file modifications
 backup_dir = ${paths:backup_subdir}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [detection] - Detection Thresholds and Time Windows
+# [detection] - How Many Attack Signs Before Blocking an IP
 # ═══════════════════════════════════════════════════════════════════════════
 [detection]
 
-# Time window for event correlation (in minutes)
-# Default: 10080 minutes = 7 days
+# Time window to look back when checking for attacks (in minutes)
+# Increase to catch slow attacks spread over days (increase false negatives)
+# Decrease to react faster but block more aggressively (increase false positives)
+# Default: 10080 minutes = 7 days (catch attacks spread over a week)
 time_window_minutes = 10080
 
-# General brute force threshold (failed attempts before blocking)
+# Number of attack events from one IP before blocking (general attacks)
+# Lower = faster blocking but more false positives
+# Higher = slower blocking but fewer innocent IPs blocked
+# Recommended: 15-30 depending on your environment
 brute_force_threshold = 20
 
-# Failed login attempt threshold
+# Number of failed login attempts before blocking (SSH, FTP, mail)
+# Lower = protect against brute force faster
+# Higher = allow legitimate users more failed attempts
+# Recommended: 15-30 (standard fail2ban uses 5-10)
 failed_login_threshold = 20
 
-# MSSQL prelogin pattern detection threshold
+# Number of SQL Server prelogin attempts from one IP before blocking
+# SQL Server reconnaissance attacks detected by pattern matching
+# Recommended: 10-20 (lower than SSH due to distinctive attack signature)
 prelogin_pattern_threshold = 20
 
-# Port scan detection threshold
+# Number of ports probed by one IP before marking as port scanner
+# Lower = block port scanners immediately
+# Higher = tolerate network monitoring/security scanning tools
+# Recommended: 10-30 (setting to 5 may block legitimate network tools)
 port_scan_threshold = 20
 
-# Fail-fast mode for detector errors (optional strictness)
-# When true: raises exception if any detector fails (strict mode)
-# When false: logs warning and continues detection (default)
-# Default: false
+# Strict error handling: should detection fail completely if one detector breaks?
+# true = stop everything if a detector crashes (safe but less resilient)
+# false = log warning and continue (more resilient to detector bugs)
+# Recommended: false (unless debugging detector issues)
 fail_on_detector_error = false
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [features] - Enable/Disable Features
+# [features] - Turn Detection Features On or Off
 # ═══════════════════════════════════════════════════════════════════════════
 [features]
 
-# Enable MSSQL prelogin pattern detection
+# SQL Server reconnaissance attacks (distinctive prelogin probes)
+# Disable if: You don't use SQL Server, or other tools already monitor this
 enable_prelogin_detection = true
 
-# Enable failed login detection (SSH, FTP, etc.)
+# Failed login detection (SSH brute force, FTP password guessing, mail auth)
+# Disable if: You use fail2ban or similar, or don't need this protection
 enable_failed_login_detection = true
 
-# Enable port scan detection
+# Port scanning detection (detects network reconnaissance)
+# Disable if: You're in development, have security scanning tools, or don't care
 enable_port_scan_detection = true
 
-# Enable CrowdSec integration
+# CrowdSec community security platform integration
+# Disable if: You don't use CrowdSec or prefer isolated detection
 enable_crowdsec_integration = true
 
-# Enable automatic NFTables firewall updates
+# Automatic firewall blocking (actually blocks IPs in NFTables rules)
+# Disable only if: You want detection only without actual blocking (for testing)
 enable_nftables_update = true
 
-# Enable automatic IP geolocation enrichment
+# Add city/country data to blocked IPs (requires IPInfo.io API token)
+# Disable if: You don't need geolocation for analysis or don't have API token
 enable_auto_enrichment = true
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [storage] - Storage Backend Configuration
+# [storage] - How Blacklist Data Is Stored
 # ═══════════════════════════════════════════════════════════════════════════
 [storage]
 
-# Use SQLite database backend instead of text files
-# Recommended for blacklists with > 10,000 IPs
+# Use SQLite database (recommended for performance on large IP lists)
+# true = Use database (better for > 10,000 IPs, faster lookups)
+# false = Use text files only (simpler, slower on very large lists)
+# Recommended: true (enables history tracking and better performance)
 use_database = true
 
-# Sync database changes back to text files (for compatibility)
-# Only applies if use_database = true
+# Keep text file copies synchronized with database (for tool compatibility)
+# true = Write blacklist to both database and .txt files
+# false = Only write to database (saves disk I/O)
+# Recommended: true (allows other tools to read blacklist files directly)
 sync_to_file = true
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [performance] - Performance and Resource Settings
+# [performance] - Speed and Disk Usage Trade-offs
 # ═══════════════════════════════════════════════════════════════════════════
 [performance]
 
-# Batch size for processing large IP lists
+# How many IPs to process at once (larger = faster but uses more memory)
+# Increase if: You have 100k+ IPs and want to speed up bulk operations
+# Decrease if: Server has limited RAM or you get out-of-memory errors
+# Recommended: 1000-5000 (2000 is typical)
 batch_size = 2000
 
-# Enable automatic backups before file modifications
-# Set to false to disable all automatic backups
+# Automatically save backup before making changes (protects against corruption)
+# false = Disable backups (not recommended - risky)
+# true = Save backup before modifying blacklist (safe default)
 backup_enabled = true
 
-# Backup interval (days)
-# Only create backup if last backup was more than X days ago
-# Set to 0 to backup on every run (not recommended)
+# How often to create new backups (in days)
+# 1 = backup every day (many backup files, more storage used)
+# 7 = backup weekly if changed (balanced approach)
+# 30 = backup monthly (fewer backup files, less storage)
+# 0 = backup on every run (creates lots of files, not recommended)
+# Recommended: 7 days (weekly)
 backup_interval_days = 7
 
-# Backup retention (days)
+# How long to keep backup files (in days)
+# Older backups are automatically deleted
+# Recommended: 30 days (keep 4 weeks of history)
 backup_retention_days = 30
 
-# Minimum number of backups to keep (even if older than retention days)
+# Minimum number of recent backups to always keep (even if older than retention)
+# Ensures you always have at least this many restore points
+# Recommended: 4 (keeps roughly 1 month of weekly backups)
 backup_min_keep = 4
 
-# Age in days after which to compress backups (saves storage)
+# Compress backups after this age to save disk space (in days)
+# 0 = Don't compress
+# 1 = Compress after 1 day (saves space, adds CPU overhead)
+# Recommended: 1 (compress old backups immediately)
 backup_compress_age_days = 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [ipinfo] - IP Geolocation Service Configuration
+# [ipinfo] - Adding City/Country Data to Blocked IPs
 # ═══════════════════════════════════════════════════════════════════════════
 [ipinfo]
 
-# Configurable filenames
+# File name for IPInfo.io API token (store separately for security)
 token_filename = ipinfo_token.txt
+
+# File name for geolocation results cache (JSON format)
 results_filename = ipinfo_results.json
+
+# Legacy CSV cache file name (for backward compatibility)
 csv_cache_filename = ipinfo_results_legacy.csv
 
-# IPInfo.io API token file location (Get a token at: https://ipinfo.io/signup)
+# Where to store IPInfo.io API token (get free token at https://ipinfo.io/signup)
+# Keep this private - it's used to query geolocation data
 token_file = ${paths:config_dir}/${ipinfo:token_filename}
 
-# Cache directory for geolocation results (in cache/ subdirectory)
+# Cache directory to avoid repeated API calls for same IP
 cache_dir = ${paths:cache_subdir}/ipinfo_cache
 
-# JSON results file (primary cache, in state/ subdirectory)
+# Main geolocation cache file (stores country, city, ISP for each IP)
 results_file = ${paths:state_subdir}/${ipinfo:results_filename}
 
-# CSV cache file (legacy format support, in state/ subdirectory)
+# Legacy CSV format cache (for tools that expect CSV output)
 csv_cache_file = ${paths:state_subdir}/${ipinfo:csv_cache_filename}
 
-# Batch service interval (seconds between iterations when running as daemon)
+# How often the background daemon queries new IPs for geolocation (in seconds)
+# 3600 = Query once per hour (every 60 minutes)
+# Lower = More frequent queries but higher API usage
+# Recommended: 3600 (1 hour)
 batch_interval = 3600
 
-# Maximum API requests per batch iteration
+# How many IPs to enrich in each API batch (max per request)
+# Higher = Fewer API calls but larger requests
+# Recommended: 1000-2000 (within free tier limits)
 batch_size = 2000
 
-# API rate limits (adjust based on your IPInfo.io plan)
-# Free tier: 50,000/month ≈ 1,600/day, 15/minute
-# Basic tier: 250,000/month ≈ 8,000/day, 15/minute
+# Daily API limit (adjust based on your IPInfo.io account tier)
+# Free: 50,000/month (roughly 1,600/day)
+# Basic: 250,000/month (roughly 8,000/day)
+# Set this to stay under your plan limit
 daily_limit = 2000
+
+# Rate limit per minute (API enforces 15 requests/minute on free tier)
+# Don't change unless you have a paid plan with different limits
 rate_limit_per_minute = 15
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [nftables] - NFTables Integration Settings
+# [nftables] - Firewall Rule Management
 # ═══════════════════════════════════════════════════════════════════════════
 [nftables]
 
-# NFTables binary path
+# Path to nft command (Linux firewall tool)
+# Should be correct on all modern Linux systems
 nft_bin = /usr/sbin/nft
 
-# NFTables set names to monitor/sync
-# Format: table_family table_name set_name
-# Example: inet filter blacklist_ipv4
+# Where to actually insert the blocked IPs in your firewall rules
+# Format: family table_name set_name
+# family = inet (IPv4+IPv6), ip (IPv4 only), ip6 (IPv6 only)
+# table_name = Your NFTables table name (usually "filter")
+# set_name = Your NFTables set for blocked IPs (usually "blacklist_ipv4")
 blacklist_set = inet filter blacklist_ipv4
+
+# Firewall set for detected port scanners (separate from login attackers)
 port_scanners_set = inet filter port_scanners
 
-# CrowdSec sets (space-separated if multiple)
+# CrowdSec security platform sets (if you use CrowdSec integration)
+# Space-separated if you have multiple CrowdSec blocklists
 crowdsec_sets = inet filter crowdsec
 
-# Fail2Ban sets pattern
+# Fail2Ban firewall sets (if you run Fail2Ban alongside TribanFT)
+# Pattern matches multiple sets using wildcards
 fail2ban_pattern = inet f2b-table addr-set-*
 
 # ───────────────────────────────────────────────────────────────────────────
-# NFTables Discovery & Event Logging (NEW in v2.4)
+# Audit Trail and Auto-Discovery
 # ───────────────────────────────────────────────────────────────────────────
 
-# Enable shadow event log for NFTables operations (JSONL format)
-# This creates an append-only audit trail without affecting core functionality
-# Log location: Configured in [state_files] nftables_event_log
-# Default: false (disabled)
+# Log all firewall rule changes for compliance and troubleshooting
+# true = Create audit trail (recommended for compliance requirements)
+# false = No audit log (saves disk space)
 nftables_event_log_enabled = false
 
-# Enable automatic discovery of NFTables sets
-# When enabled, TribanFT can detect and import from any NFTables set
-# Default: false (manual configuration only)
+# Automatically detect and import from other firewall rules (advanced)
+# true = Import IPs from CrowdSec, Fail2Ban, and other NFTables sets
+# false = Only use TribanFT's own rules (simpler, more isolated)
 nftables_auto_discovery = false
 
-# Sets to automatically import from (comma-separated)
-# Format: family:table:set_name,family:table:set_name
-# Example: inet:filter:attackers_ipv4,inet:filter:crowdsec_blocklist
-# Leave empty to disable auto-import
+# Which other firewall rule sets to automatically sync from (comma-separated)
+# Format: family:table:set_name
+# Example: inet:filter:crowdsec_blocklist,inet:filter:external_threats
+# Leave empty = Don't import any external rule sets
 nftables_import_sets =
 
 # ───────────────────────────────────────────────────────────────────────────
-# NFTables Parser Configuration (Port Scan Detection Thresholds)
+# Port Scan Detection Settings
 # ───────────────────────────────────────────────────────────────────────────
-# NOTE: Port scan and network scan thresholds are configured in YAML, not here.
-#
-# To adjust detection sensitivity, edit:
-#   bruteforce_detector/rules/parsers/nftables.yaml
-#
-# Configuration section:
-#   port_scan_threshold: 5      # Number of ports to trigger PORT_SCAN (default: 5)
-#   network_scan_threshold: 10  # Number of attempts to trigger NETWORK_SCAN (default: 10)
-#
-# See docs/PARSER_EVENTTYPES_MAPPING.md for details on parser configuration.
+# Note: Port scan thresholds are configured in the YAML rules file, not here
+# To adjust, edit: bruteforce_detector/rules/parsers/nftables.yaml
+# Look for port_scan_threshold and network_scan_threshold values
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [realtime] - Real-Time Log Monitoring (NEW in v2.3)
+# [realtime] - Instant Attack Detection (Fast Response Mode)
 # ═══════════════════════════════════════════════════════════════════════════
 [realtime]
 
-# Real-time monitoring uses filesystem events (inotify/kqueue) to detect
-# new log entries immediately, reducing detection lag from 5 minutes to <2 seconds.
-#
-# If watchdog library is unavailable or fails, automatically falls back to
-# periodic mode with 60-second intervals (no manual configuration needed).
+# Real-time monitoring watches log files instantly instead of polling periodically
+# Result: Detect attacks in <2 seconds instead of 5-60 seconds
+# Fallback: Automatically switches to polling if real-time unavailable
+# Note: Requires watchdog library installed (included with standard install)
 
-# Enable real-time monitoring for specific log sources
-# Set to false to disable monitoring for that source
+# Watch these log sources instantly (detect attacks as they happen)
+# true = Watch for new attacks immediately
+# false = Check periodically (less responsive but uses less resources)
 monitor_syslog = true
 monitor_mssql = true
 monitor_apache = true
 monitor_nginx = true
 
-# Alternative: Explicitly list custom files to monitor
-# Uncomment to override auto-detection from log paths
+# Optional: Watch custom log files not auto-detected
+# Uncomment and adjust for your environment
 # monitor_files = /var/log/auth.log, /custom/app.log
 
-# Debounce interval (seconds)
-# Batch rapid log writes within this window to reduce processing load
-# Default: 1.0 second (handles log bursts efficiently)
+# Debounce rapid log writes (avoid processing duplicate entries)
+# How long to wait for more entries before processing batch (seconds)
+# Lower = Process faster but may miss log bursts
+# Higher = More efficient but slower response
+# Recommended: 0.5-2.0 seconds
 debounce_interval = 1.0
 
-# Rate limiting for DoS protection
-# Maximum log events to process per second before triggering backoff
-# Prevents attackers from overwhelming the system by flooding logs
+# Detect log flooding attacks and slow down detection (DoS protection)
+# Maximum log entries to process per second before pausing
+# Above this triggers backoff to prevent resource exhaustion
+# Set to 0 = Disable rate limiting (not recommended under attack)
+# Recommended: 500-2000 depending on your system resources
 max_events_per_second = 1000
 
-# Rate limit backoff duration (seconds)
-# If rate limit exceeded, pause real-time monitoring for this duration
-# System falls back to periodic mode during backoff
+# How long to pause if log flooding is detected (seconds)
+# During this time, fall back to periodic checking instead of real-time
+# Recovers to real-time monitoring once attack subsides
+# Recommended: 10-60 seconds
 rate_limit_backoff = 30
 
-# Fallback interval (seconds)
-# If real-time monitoring fails to start (missing inotify, permissions, etc),
-# automatically fall back to periodic polling at this interval
-# Default: 60 seconds (1 minute)
+# Automatic fallback if real-time monitoring can't start (seconds)
+# Reasons it might fail: Missing watchdog library, permission issues
+# Falls back to checking logs at this interval
+# Recommended: 60 seconds (checks once per minute)
 fallback_interval = 60
 
-# NFTables Auto-Discovery Interval (seconds)
-# How often to run NFTables auto-discovery in real-time mode
-# This imports IPs from CrowdSec and other NFTables sets automatically
-# Set to 0 to disable periodic discovery in real-time mode
-# Default: 3600 seconds (1 hour)
+# How often to check other firewall rules (CrowdSec, Fail2Ban) (seconds)
+# Only used if nftables_auto_discovery is enabled
+# 3600 = Check hourly for rules from other tools
+# Set to 0 = Disable periodic discovery (only check on startup)
+# Recommended: 3600 (once per hour)
 nftables_discovery_interval = 3600
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [advanced] - Advanced Settings (Do Not Modify Unless You Know What You're Doing)
+# [advanced] - Expert Settings (Only Change If You Know What You're Doing)
 # ═══════════════════════════════════════════════════════════════════════════
 [advanced]
 
-# Enable verbose logging (debug mode)
+# Show detailed debug information in logs (for troubleshooting)
+# false = Normal logging (quiet)
+# true = Verbose logging (shows all decisions, slower, uses more disk)
+# Enable when: Debugging detection issues or contacting support
 verbose = false
 
-# Disable startup integrity verification (faster but risky)
+# Skip integrity checks on startup (saves startup time, risky)
+# false = Verify blacklist hasn't been corrupted (safe default)
+# true = Skip verification (faster startup but could miss data corruption)
+# Only set true if: You know what you're doing or running in tests
 skip_verify = false
 
-# Minimum expected IPs in blacklist (anti-corruption protection)
-# If blacklist drops below this threshold and loses >50% of IPs, write is blocked
-# Set to 0 to disable protection (not recommended)
+# Safety check: Minimum IPs expected in blacklist (detects accidental deletion)
+# If blacklist drops below this AND loses > 50%, write is blocked (prevents loss)
+# Set to: Number of IPs you normally have (or 1000 for safety)
+# Set to 0: Disable this protection (not recommended)
+# Recommended: 1000 or more (depends on your blacklist size)
 min_expected_ips = 1000
 
-# User and group for service execution (systemd only)
+# User and group that runs the TribanFT service (systemd only)
+# Usually: root (needs root to modify firewall rules)
+# Can change to: Dedicated unprivileged user if firewall rules are pre-created
 service_user = root
 service_group = root
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [plugins] - Plugin System Configuration
+# [plugins] - Extension System for Custom Detection
 # ═══════════════════════════════════════════════════════════════════════════
 [plugins]
 
-# Enable plugin auto-discovery system
-# When enabled, detectors and parsers are automatically loaded from plugins/ directory
-# When disabled, uses legacy hardcoded detector/parser initialization
+# Enable automatic plugin discovery (recommended for most users)
+# true = Auto-load detection plugins from plugins/ directory
+# false = Use only built-in detectors (older, less flexible)
+# Recommended: true (allows adding custom detectors without code changes)
 enable_plugin_system = true
 
-# Plugin directories (relative to project_dir)
-# These directories are scanned for detector and parser plugins
+# Where plugins are stored (relative to TribanFT installation)
+# Detectors = Add custom attack detection rules
+# Parsers = Add support for new log formats
 detector_plugin_dir = ${paths:project_dir}/bruteforce_detector/plugins/detectors
 parser_plugin_dir = ${paths:project_dir}/bruteforce_detector/plugins/parsers
 
-# ┌───────────────────────────────────────────────────────────────────────┐
-# │ YAML Rule Engine                                                      │
-# │ Define detection patterns in YAML files - no code required!          │
-# └───────────────────────────────────────────────────────────────────────┘
+# ────────────────────────────────────────────────────────────────────────
+# YAML Detection Rules (Configure Detection Without Writing Code)
+# ────────────────────────────────────────────────────────────────────────
 
-# Enable YAML-based detection rules
-# When enabled, scans rules_dir for YAML rule files
+# Enable YAML rules (define custom detection patterns in plain text)
+# true = Load detection rules from YAML files (flexible, no restart needed)
+# false = Use only built-in Python detectors
 enable_yaml_rules = true
 
-# Rules directory for YAML-based detection patterns
-# Place your custom .yaml rule files here
+# Directory where your YAML rule files are stored
+# Add custom detection patterns here as .yaml files
 rules_dir = ${paths:project_dir}/bruteforce_detector/rules
 
-# ┌───────────────────────────────────────────────────────────────────────┐
-# │ YAML Parser Patterns (NEW in v2.1)                                    │
-# │ Define parser patterns in YAML files - update without code changes!  │
-# └───────────────────────────────────────────────────────────────────────┘
+# ────────────────────────────────────────────────────────────────────────
+# Log Format Parsers (Add Support for New Log Types)
+# ────────────────────────────────────────────────────────────────────────
 
-# Parser patterns are automatically loaded from:
-#   ${rules_dir}/parsers/
+# Log format patterns are loaded from: ${rules_dir}/parsers/
 #
-# Pattern files:
-#   - apache.yaml    # Apache/Nginx SQL injection, WordPress attack patterns
-#   - syslog.yaml    # Syslog prelogin, port scan patterns
-#   - mssql.yaml     # MSSQL failed login patterns
-#   - PARSER_TEMPLATE.yaml.example  # Template for custom patterns
+# Built-in pattern files:
+#   apache.yaml    - Detects SQL injection and WordPress attacks in web logs
+#   syslog.yaml    - Detects login failures and port scans
+#   mssql.yaml     - Detects SQL Server prelogin attacks
 #
-# To add custom patterns:
-#   1. Copy PARSER_TEMPLATE.yaml.example to custom_parser.yaml
-#   2. Edit pattern_groups section with your regex patterns
-#   3. Restart tribanft or re-run detection
+# To add custom patterns for your application:
+#   1. Copy PARSER_TEMPLATE.yaml.example to your_app.yaml
+#   2. Edit with your log format (regex patterns)
+#   3. No restart needed - patterns loaded automatically
 #
-# No restart required for pattern updates - loaded at parser initialization
-#
-# See docs/PARSERS.md for detailed pattern syntax and examples
+# See docs/PARSERS.md for detailed pattern syntax
 
-# ┌───────────────────────────────────────────────────────────────────────┐
-# │ Per-Plugin Configuration                                              │
-# │ Control individual plugins by adding sections like:                   │
-# │   [plugin:detector_name] or [plugin:parser_name]                      │
-# └───────────────────────────────────────────────────────────────────────┘
+# ────────────────────────────────────────────────────────────────────────
+# Per-Plugin Settings (Customize Individual Plugins)
+# ────────────────────────────────────────────────────────────────────────
 
-# Example: Disable specific plugin
+# Disable specific detector plugins (leave enabled by default)
 # enable_prelogin_detector_plugin = false
 # enable_crowdsec_detector_plugin = false
 
-# Example: Custom plugin configuration (for future custom plugins)
+# Add custom settings for plugins (if they support configuration)
 # [plugin:custom_detector]
 # threshold = 15
 # time_window = 120
-# custom_parameter = value
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# [threat_intelligence] - Threat Feed Integration (NEW in v2.5)
+# [threat_intelligence] - Block Known Bad IPs From Public Lists
 # ═══════════════════════════════════════════════════════════════════════════
 [threat_intelligence]
 
-# Enable threat feed integration
-# When enabled, TribanFT queries external threat intelligence sources
-# for known malicious IPs and imports them into the blacklist
-# Default: false (requires API keys and configuration)
+# Import known malicious IPs from public threat intelligence feeds
+# true = Automatically block IPs reported as malicious by Spamhaus, etc.
+# false = Don't import external threat feeds (only use local detection)
+# Recommended: true (adds layer of security for free)
 threat_feeds_enabled = false
 
-# Comma-separated list of threat feed sources to query
-# Available sources:
-#   - spamhaus:    Spamhaus DROP/EDROP lists (free, no API key needed)
-#   - abuseipdb:   AbuseIPDB community database (requires API key)
-#   - alienvault:  AlienVault OTX threat intelligence (requires API key)
+# Which threat intelligence sources to use (comma-separated)
+# Available:
+#   spamhaus = Free spam/botnet IP list (no registration needed)
+#   abuseipdb = Community-reported malicious IPs (free tier available)
+#   alienvault = AlienVault's threat research (free tier available)
 #
-# Recommended: Start with spamhaus only (free, no registration)
-# Example: threat_feed_sources = spamhaus
-# Example: threat_feed_sources = spamhaus,abuseipdb
+# Start with: spamhaus (free, instant, no API key)
+# All three: spamhaus,abuseipdb,alienvault (requires API keys for latter two)
 threat_feed_sources = spamhaus
 
-# Cache duration for threat feed results (hours)
-# How long to cache feed results before querying again
-# Reduces API calls and respects rate limits
-# Default: 24 hours
+# How long to use cached threat feeds before re-querying (hours)
+# 24 = Check once per day (balances freshness with API efficiency)
+# Lower = More current threat data but higher API usage
+# Higher = Less API usage but slower to add new threats
+# Recommended: 12-24 hours
 threat_feed_cache_hours = 24
 
 # ───────────────────────────────────────────────────────────────────────────
-# API Key Configuration
+# API Keys for Threat Feeds (Optional - Only If Using Paid Services)
 # ───────────────────────────────────────────────────────────────────────────
 
-# AbuseIPDB API key file location (optional, only if using abuseipdb feed)
-# Get a free API key at: https://www.abuseipdb.com/
-# Free tier: 1,000 checks/day
-# Save your API key to this file (one line, plain text)
+# AbuseIPDB API key file (only needed if using abuseipdb source)
+# Get free API key: https://www.abuseipdb.com/register
+# Free tier: 1,000 IP checks/day (sufficient for most deployments)
+# Uncomment and set the path if using AbuseIPDB
 # abuseipdb_api_key_file = ${paths:config_dir}/abuseipdb_key.txt
 
-# AlienVault OTX API key file location (optional, only if using alienvault feed)
-# Get a free API key at: https://otx.alienvault.com/
-# Save your API key to this file (one line, plain text)
+# AlienVault OTX API key file (only needed if using alienvault source)
+# Get free API key: https://otx.alienvault.com/api
+# Provides access to community threat intelligence
+# Uncomment and set the path if using AlienVault
 # alienvault_api_key_file = ${paths:config_dir}/alienvault_key.txt
 
 # ───────────────────────────────────────────────────────────────────────────
-# Notes
+# How Threat Feed Integration Works
 # ───────────────────────────────────────────────────────────────────────────
-# 1. Spamhaus DROP/EDROP lists are free and do not require API keys
-# 2. AbuseIPDB and AlienVault require free registration for API keys
-# 3. Threat feed results are cached to minimize API calls
-# 4. Existing blacklisted IPs are not re-imported (automatic deduplication)
-# 5. See bruteforce_detector/rules/detectors/threat_intelligence.yaml for details
+# 1. Spamhaus feeds are free - enable them without any API key
+# 2. Results are cached locally - reduces API calls and network usage
+# 3. Duplicate IPs are automatically detected and not re-imported
+# 4. Configure detection sensitivity in:
+#    bruteforce_detector/rules/detectors/threat_intelligence.yaml

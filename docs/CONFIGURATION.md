@@ -60,7 +60,7 @@ export TRIBANFT_DATA_DIR="/custom/path"
 **Common overrides**:
 ```ini
 [paths]
-data_dir = /var/lib/tribanft
+data_dir = ~/.local/share/tribanft
 data_subdir = ${data_dir}/data
 state_subdir = ${data_dir}/state
 logs_subdir = ${data_dir}/logs
@@ -302,8 +302,8 @@ Override any config option:
 | Variable | Override | Example |
 |----------|----------|---------|
 | TRIBANFT_CONFIG_FILE | Config file path | `/etc/tribanft/config.conf` |
-| TRIBANFT_DATA_DIR | data_dir | `/var/lib/tribanft` |
-| TRIBANFT_STATE_DIR | state_dir | `/var/lib/tribanft/state` |
+| TRIBANFT_DATA_DIR | data_dir | `~/.local/share/tribanft` |
+| TRIBANFT_STATE_DIR | state_dir | `~/.local/share/tribanft/state` |
 | IPINFO_TOKEN | IPInfo API token | `your-api-token` |
 | BFD_ENABLE_NFTABLES_UPDATE | enable_nftables_update | `true` or `false` |
 
@@ -489,7 +489,7 @@ Complete configuration for production deployment with NFTables integration.
 
 ```ini
 [paths]
-data_dir = /var/lib/tribanft
+data_dir = ~/.local/share/tribanft
 state_dir = ${data_dir}/state
 project_dir = ${data_dir}/bruteforce_detector
 data_subdir = ${paths:data_dir}/data
@@ -585,7 +585,7 @@ Optimized configuration for high-traffic environments (>10k IPs, multiple servic
 
 ```ini
 [paths]
-data_dir = /var/lib/tribanft
+data_dir = ~/.local/share/tribanft
 state_dir = ${data_dir}/state
 project_dir = ${data_dir}/bruteforce_detector
 data_subdir = ${paths:data_dir}/data

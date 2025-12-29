@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.2] - 2025-12-28
+
+### Changed
+
+- **Configuration Documentation**: Rewrote all config.conf.template parameter descriptions for improved clarity and user-friendliness
+  - More accessible language while maintaining technical accuracy
+  - Added practical context on when/why to change settings
+  - Clarified impact of configuration changes
+  - Improved examples throughout all sections
+  - File: `config.conf.template`
+
+- **Enhanced Logging**: Added comprehensive DEBUG-level logging to core managers and functions
+  - Entry/exit logging for critical operations with parameters and results
+  - Transaction logging in database operations (bulk_add, delete_ip)
+  - Whitelist check logging for security debugging
+  - All logs use DEBUG level (only visible with --verbose flag to prevent log noise)
+  - Files: `bruteforce_detector/managers/blacklist.py`, `bruteforce_detector/managers/whitelist.py`, `bruteforce_detector/managers/database.py`
+
+- **Installation Script**: Complete rewrite of install.sh with defensive programming and better user experience
+  - Added PATH verification with clear instructions if ~/.local/bin is not in PATH
+  - More robust prerequisite validation (Python version, pip3, systemd availability)
+  - Better error handling with helpful installation instructions
+  - Clearer progress indicators and status messages
+  - Improved next steps instructions after installation
+  - Error trap for cleanup on failure
+  - File: `install.sh`
+
+- **Path Standardization**: Replaced all hardcoded /var/lib/tribanft paths with config-based references
+  - Updated documentation to use ~/.local/share/tribanft (actual default)
+  - Changed docstring examples to use ${paths:data_dir} interpolation
+  - Improved consistency across codebase
+  - Files: `docs/CONFIGURATION.md`, `bruteforce_detector/models.py`, `bruteforce_detector/utils/file_lock.py`
+
+### Removed
+
+- **Deprecated Command**: Removed --compress-backups command (automatic compression remains via backup_compress_age_days config)
+  - Removed argparse argument from main.py
+  - Removed command handler implementation
+  - Updated COMMANDS.md documentation
+  - Note: Automatic backup compression still functions normally via configuration
+  - Files: `bruteforce_detector/main.py`, `docs/COMMANDS.md`
+
+---
+
 ## [2.9.1] - 2025-12-28
 
 ### Fixed

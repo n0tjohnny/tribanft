@@ -91,6 +91,7 @@ class BlacklistManager:
         Args:
             detections: List of DetectionResult objects from detectors
         """
+        self.logger.debug(f"update_blacklists: Processing {len(detections)} detection(s)")
         new_ips_info = self._prepare_detection_ips(detections)
 
         if new_ips_info:
@@ -108,12 +109,15 @@ class BlacklistManager:
                 self.logger.error(f"NFTables sync failed: {e}")
                 self.logger.warning("Continuing blacklist operation without NFTables sync")
                 # Blacklist is still updated in file/database, just not synced to firewall
-    
-    def add_manual_ip(self, ip_str: str, reason: str = "Manually added", 
+            self.logger.debug(f"update_blacklists: Completed - {len(new_ips_info)} IP(s) processed")
+        else:
+            self.logger.debug("update_blacklists: No new IPs to process")
+
+    def add_manual_ip(self, ip_str: str, reason: str = "Manually added",
                      search_logs: bool = True) -> bool:
         """
         Manually add IP with comprehensive investigation and logging.
-        
+
         Process:
         1. Validate IP address format
         2. Check whitelist (prevent blocking trusted IPs)
@@ -121,20 +125,22 @@ class BlacklistManager:
         4. Add to manual blacklist file with timestamps
         5. Propagate to main blacklist files
         6. Generate investigation report
-        
+
         Args:
             ip_str: IP address string to block
             reason: Human-readable reason for blocking
             search_logs: Whether to analyze historical logs for this IP
-            
+
         Returns:
             True if successful, False if invalid IP or whitelisted
         """
+        self.logger.debug(f"add_manual_ip: ip={ip_str}, reason={reason}, search_logs={search_logs}")
         try:
             ip = ipaddress.ip_address(ip_str)
             
             if self.whitelist_manager.is_whitelisted(ip):
                 self.logger.error(f"ERROR: Cannot blacklist {ip_str} - it's in whitelist")
+                self.logger.debug(f"add_manual_ip: Failed - IP {ip_str} is whitelisted")
                 return False
             
             # Investigate IP with full context
@@ -153,11 +159,13 @@ class BlacklistManager:
             self._add_to_manual_blacklist(ip_str, investigation)
             self._add_to_main_blacklists({ip_str: investigation})
             self.investigator.format_investigation_log(ip_str, investigation)
-            
+
+            self.logger.debug(f"add_manual_ip: Successfully added {ip_str}")
             return True
-                
+
         except ValueError:
             self.logger.error(f"ERROR: Invalid IP address: {ip_str}")
+            self.logger.debug(f"add_manual_ip: Failed - Invalid IP format: {ip_str}")
             return False
 
     def remove_ip(self, ip_str: str) -> bool:
@@ -179,6 +187,7 @@ class BlacklistManager:
         Returns:
             True if successful, False if invalid IP or not found
         """
+        self.logger.debug(f"remove_ip: Removing {ip_str}")
         try:
             ip = ipaddress.ip_address(ip_str)
 
@@ -217,13 +226,16 @@ class BlacklistManager:
 
                 if success:
                     self.logger.info(f"Successfully removed {ip_str} from blacklist storage")
+                    self.logger.debug(f"remove_ip: Successfully removed {ip_str}")
                     return True
                 else:
                     self.logger.warning(f"IP {ip_str} was not in blacklist storage")
+                    self.logger.debug(f"remove_ip: IP {ip_str} not found in storage")
                     return False
 
         except ValueError:
             self.logger.error(f"ERROR: Invalid IP address: {ip_str}")
+            self.logger.debug(f"remove_ip: Failed - Invalid IP format: {ip_str}")
             return False
 
     def sync_from_nftables(self, sync_to_nftables: bool = False, 
@@ -617,13 +629,19 @@ class BlacklistManager:
     
     def _filter_whitelisted_ips(self, ips_info: Dict) -> Dict:
         """Remove whitelisted IPs from blacklist data."""
+        self.logger.debug(f"_filter_whitelisted_ips: Filtering {len(ips_info)} IP(s)")
         filtered = {}
+        filtered_count = 0
         for ip_str, info in ips_info.items():
             try:
                 if not self.whitelist_manager.is_whitelisted(ipaddress.ip_address(ip_str)):
                     filtered[ip_str] = info
+                else:
+                    filtered_count += 1
+                    self.logger.debug(f"_filter_whitelisted_ips: Skipped whitelisted IP {ip_str}")
             except ValueError:
                 continue
+        self.logger.debug(f"_filter_whitelisted_ips: Filtered {filtered_count} whitelisted IP(s), {len(filtered)} remaining")
         return filtered
     
     def _add_to_manual_blacklist(self, ip_str: str, info: Dict):
