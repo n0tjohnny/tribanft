@@ -6,7 +6,7 @@
 # All paths and parameters are configured here.
 #
 # IMPORTANT: After modifying this file, restart all TribanFT services:
-#   sudo systemctl restart tribanft-ipinfo-batch
+#	sudo systemctl restart tribanft tribanft-ipinfo-batch
 #   (or re-run your cron jobs / manual commands)
 #
 # ═══════════════════════════════════════════════════════════════════════════
