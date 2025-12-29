@@ -119,17 +119,18 @@ class TestC3RegexTimeoutThreadSafety(unittest.TestCase):
 
     def test_thread_safe_regex_timeout(self):
         """Regex timeout must be thread-safe (no signal handler races)."""
-        # CRITICAL FIX: Use smaller input to avoid extreme backtracking
-        # Pattern (a+)+b with 25 'a's still causes ReDoS but manageable
+        # CRITICAL FIX: Use balanced input to trigger timeout without extreme CPU load
+        # Pattern (a+)+b with 28 'a's causes enough backtracking to exceed timeout
+        # but not so much that it hangs the system
         pattern = re.compile(r'(a+)+b')
-        text = 'a' * 25 + 'c'  # Smaller input - still triggers ReDoS but finishes quickly
+        text = 'a' * 28 + 'c'  # Sweet spot: triggers timeout in ~0.15s
 
-        # Test timeout works
+        # Test timeout works (use 0.1s timeout)
         with self.assertRaises(RegexTimeoutError):
-            _run_regex_with_timeout(pattern, text, timeout_seconds=0.05)
+            _run_regex_with_timeout(pattern, text, timeout_seconds=0.1)
 
-        # Wait for daemon thread to finish
-        time.sleep(0.2)
+        # Wait for daemon thread to finish (it will keep running for a bit)
+        time.sleep(0.3)
 
     def test_concurrent_regex_matching_no_interference(self):
         """Multiple threads doing regex matching should not interfere."""
