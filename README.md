@@ -38,9 +38,9 @@ See [PARSER_EVENTTYPES_MAPPING.md](docs/PARSER_EVENTTYPES_MAPPING.md) for comple
 
 ```bash
 # Download latest release
-wget https://github.com/n0tjohnny/tribanft/archive/refs/tags/tribanft-v2.9.1.tar.gz
-tar -xzf v2.9.1.tar.gz
-cd tribanft-2.9.1
+wget https://github.com/n0tjohnny/tribanft/archive/refs/tags/tribanft-v2.9.3.tar.gz
+tar -xzf v2.9.3.tar.gz
+cd tribanft-2.9.3
 
 # Automated installation (one command)
 ./install.sh
