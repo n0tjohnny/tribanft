@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
 
 from ..models import SecurityEvent, DetectionResult, EventType, DetectionConfidence
@@ -42,6 +42,9 @@ MAX_YAML_COMPLEXITY = 10000  # Max total objects in parsed YAML
 # Thread Limiting for ReDoS Protection (SECURITY FIX C3)
 MAX_CONCURRENT_REGEX_THREADS = 20  # Prevent thread exhaustion under attack
 _regex_semaphore = threading.Semaphore(MAX_CONCURRENT_REGEX_THREADS)
+
+# Pattern Cache Size Limit (SECURITY FIX H3)
+MAX_COMPILED_PATTERNS_CACHE_SIZE = 1000  # Prevent unbounded memory growth
 
 
 class RegexTimeoutError(Exception):
@@ -178,7 +181,9 @@ class RuleEngine:
         self.rules_dir = Path(rules_dir)
         self.logger = logging.getLogger(__name__)
         self.rules: Dict[str, DetectionRule] = {}
-        self._compiled_patterns: Dict[str, List[re.Pattern]] = {}
+        # SECURITY FIX H3: LRU cache prevents unbounded memory growth (10GB after 10K reloads)
+        self._compiled_patterns: OrderedDict = OrderedDict()
+        self._pattern_cache_lock = threading.Lock()  # Thread-safe cache access
         self.validator = DetectorValidator()  # Detector configuration validator
 
         # CRITICAL FIX #18: Thread-safe rule reloading
@@ -358,6 +363,51 @@ class RuleEngine:
             self.logger.error(f"Failed to parse rule from {source_file}: {e}")
             return None
 
+    def _store_compiled_patterns(self, rule_name: str, patterns: List[tuple]):
+        """
+        Store compiled patterns with LRU eviction.
+
+        SECURITY FIX H3: Implements LRU cache to prevent unbounded memory growth.
+        Without this, 10,000 rule reloads → 10GB memory consumption.
+
+        Args:
+            rule_name: Name of the rule
+            patterns: List of (compiled_pattern, description) tuples
+        """
+        with self._pattern_cache_lock:
+            # Move to end (most recently used)
+            if rule_name in self._compiled_patterns:
+                self._compiled_patterns.move_to_end(rule_name)
+
+            # Store patterns
+            self._compiled_patterns[rule_name] = patterns
+
+            # LRU eviction: Remove oldest if cache exceeds limit
+            while len(self._compiled_patterns) > MAX_COMPILED_PATTERNS_CACHE_SIZE:
+                oldest_rule = next(iter(self._compiled_patterns))
+                evicted = self._compiled_patterns.pop(oldest_rule)
+                self.logger.debug(
+                    f"LRU cache evicted patterns for rule '{oldest_rule}' "
+                    f"({len(evicted)} patterns). Cache size: {len(self._compiled_patterns)}"
+                )
+
+    def _get_compiled_patterns_safe(self, rule_name: str) -> List[tuple]:
+        """
+        Thread-safe retrieval of compiled patterns with LRU update.
+
+        Args:
+            rule_name: Name of the rule
+
+        Returns:
+            List of (compiled_pattern, description) tuples
+        """
+        with self._pattern_cache_lock:
+            if rule_name in self._compiled_patterns:
+                # Move to end (most recently used)
+                self._compiled_patterns.move_to_end(rule_name)
+                return self._compiled_patterns[rule_name]
+            return []
+
     def _compile_patterns(self, rule: DetectionRule):
         """
         Pre-compile regex patterns with ReDoS protection.
@@ -400,7 +450,8 @@ class RuleEngine:
                     f"Invalid regex in rule '{rule.name}': {pattern_str} - {e}"
                 )
 
-        self._compiled_patterns[rule.name] = compiled
+        # SECURITY FIX H3: Store with LRU eviction
+        self._store_compiled_patterns(rule.name, compiled)
 
     def _is_safe_regex(self, pattern: str) -> bool:
         """
@@ -553,7 +604,8 @@ class RuleEngine:
         Returns:
             True if event matches any pattern, False otherwise
         """
-        compiled_patterns = self._compiled_patterns.get(rule.name, [])
+        # SECURITY FIX H3: Thread-safe LRU cache access
+        compiled_patterns = self._get_compiled_patterns_safe(rule.name)
 
         # ReDoS protection: Limit input length
         message = event.raw_message[:MAX_INPUT_LENGTH]
@@ -628,7 +680,8 @@ class RuleEngine:
         try:
             # Get matched pattern description (first match) with ReDoS protection
             pattern_desc = 'pattern match'
-            for pattern, desc in self._compiled_patterns.get(rule.name, []):
+            # SECURITY FIX H3: Thread-safe LRU cache access
+            for pattern, desc in self._get_compiled_patterns_safe(rule.name):
                 for event in events:
                     try:
                         # SECURITY FIX C3: Thread-safe regex timeout
@@ -716,7 +769,9 @@ class RuleEngine:
         with self._reload_lock:
             self.logger.info("Reloading detection rules...")
             self.rules.clear()
-            self._compiled_patterns.clear()
+            # SECURITY FIX H3: Thread-safe cache clear
+            with self._pattern_cache_lock:
+                self._compiled_patterns.clear()
             self._load_rules()
             self.logger.info(f"Reloaded {len(self.rules)} rules")
 

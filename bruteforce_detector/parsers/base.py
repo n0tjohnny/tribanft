@@ -138,11 +138,22 @@ class BaseLogParser(ABC):
         """
         Read lines from log file with error handling.
 
+        SECURITY FIX H1: Rejects symlinks to prevent arbitrary file read attacks.
+
         Yields:
             Lines from log file as strings
         """
         if not self.log_path.exists():
             self.logger.error(f"Log file not found: {self.log_path}")
+            return iter(())
+
+        # SECURITY FIX H1: Symlink attack protection
+        # Prevent reading arbitrary files via symlink to /etc/shadow, keys, etc.
+        if self.log_path.is_symlink():
+            self.logger.error(
+                f"SECURITY: Rejected symlink log file: {self.log_path} "
+                f"-> {self.log_path.resolve()} (prevents arbitrary file read)"
+            )
             return iter(())
 
         try:
@@ -160,6 +171,8 @@ class BaseLogParser(ABC):
         Used by real-time monitoring to only process new log entries.
         More efficient than reading entire file and filtering by timestamp.
 
+        SECURITY FIX H1: Rejects symlinks to prevent arbitrary file read attacks.
+
         Args:
             from_offset: Starting byte position
             to_offset: Ending byte position
@@ -173,6 +186,15 @@ class BaseLogParser(ABC):
 
         if not self.log_path.exists():
             self.logger.error(f"Log file not found: {self.log_path}")
+            return ([], from_offset)
+
+        # SECURITY FIX H1: Symlink attack protection
+        # Prevent reading arbitrary files via symlink to /etc/shadow, keys, etc.
+        if self.log_path.is_symlink():
+            self.logger.error(
+                f"SECURITY: Rejected symlink log file: {self.log_path} "
+                f"-> {self.log_path.resolve()} (prevents arbitrary file read)"
+            )
             return ([], from_offset)
 
         try:

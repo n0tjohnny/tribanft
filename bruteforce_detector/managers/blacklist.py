@@ -79,6 +79,45 @@ def _validate_event_count(count: int, source: str = "unknown") -> int:
     return count
 
 
+def _sanitize_ip_for_logging(ip_input: str) -> str:
+    """
+    Sanitize IP address for safe logging and file output (SECURITY FIX H5).
+
+    Prevents log injection attacks via malicious IP strings containing
+    newlines, control characters, or ANSI escape codes that could:
+    - Inject fake log entries to hide attacks
+    - Tamper with audit trails
+    - Create false security events
+    - Conceal malicious activity
+
+    Args:
+        ip_input: IP address string from potentially untrusted input
+
+    Returns:
+        Sanitized IP string safe for logging, or "INVALID[...]" placeholder
+        if the input is malformed
+
+    Examples:
+        >>> _sanitize_ip_for_logging("192.168.1.1")
+        "192.168.1.1"
+        >>> _sanitize_ip_for_logging("10.0.0.1\\nFAKE LOG ENTRY")
+        "INVALID[10.0.0.1FAKE LOG ENTRY]"
+    """
+    try:
+        # Validate and normalize IP using ipaddress module
+        # This ensures only valid IPs are logged (no newlines, control chars)
+        ip_obj = ipaddress.ip_address(str(ip_input).strip())
+        return str(ip_obj)
+    except (ValueError, AttributeError, TypeError):
+        # Invalid IP - return safe placeholder
+        # Remove any newlines/control chars from original for debugging
+        safe_str = ''.join(
+            c for c in str(ip_input)[:50]  # Limit length to prevent log spam
+            if c.isprintable() and c not in '\n\r\t'
+        )
+        return f"INVALID[{safe_str}]"
+
+
 class BlacklistManager:
     """
     Central orchestrator for all blacklist operations.
@@ -160,11 +199,13 @@ class BlacklistManager:
 
         Process:
         1. Validate IP address format
-        2. Check whitelist (prevent blocking trusted IPs)
-        3. Investigate IP (geolocation + log analysis)
-        4. Add to manual blacklist file with timestamps
-        5. Propagate to main blacklist files
-        6. Generate investigation report
+        2. Investigate IP (geolocation + log analysis)
+        3. Atomic check-and-write: Check whitelist and add to blacklist under lock
+        4. Generate investigation report
+
+        SECURITY FIX H4: Whitelist check moved inside _update_lock to prevent TOCTOU.
+        Without lock: IP could be whitelisted between check and write, allowing
+        admin IP to be blocked despite whitelist protection.
 
         Args:
             ip_str: IP address string to block
@@ -174,19 +215,16 @@ class BlacklistManager:
         Returns:
             True if successful, False if invalid IP or whitelisted
         """
-        self.logger.debug(f"add_manual_ip: ip={ip_str}, reason={reason}, search_logs={search_logs}")
+        # SECURITY FIX H5: Sanitize IP for logging to prevent log injection
+        safe_ip = _sanitize_ip_for_logging(ip_str)
+        self.logger.debug(f"add_manual_ip: ip={safe_ip}, reason={reason}, search_logs={search_logs}")
         try:
             ip = ipaddress.ip_address(ip_str)
-            
-            if self.whitelist_manager.is_whitelisted(ip):
-                self.logger.error(f"ERROR: Cannot blacklist {ip_str} - it's in whitelist")
-                self.logger.debug(f"add_manual_ip: Failed - IP {ip_str} is whitelisted")
-                return False
-            
-            # Investigate IP with full context
+
+            # Investigate IP with full context (slow operation - outside lock)
             investigation = self.investigator.investigate_ip(ip_str, search_logs)
             investigation['ip'] = ip
-            
+
             # Ensure all timestamps are set
             now = datetime.now()
             if not investigation.get('first_seen'):
@@ -194,18 +232,29 @@ class BlacklistManager:
             if not investigation.get('last_seen'):
                 investigation['last_seen'] = investigation.get('first_seen', now)
             investigation['date_added'] = now  # Always set when adding to blacklist
-            
-            # Add to blacklist files
-            self._add_to_manual_blacklist(ip_str, investigation)
-            self._add_to_main_blacklists({ip_str: investigation})
-            self.investigator.format_investigation_log(ip_str, investigation)
 
-            self.logger.debug(f"add_manual_ip: Successfully added {ip_str}")
+            # SECURITY FIX H4: Atomic whitelist check + write operations
+            # Acquire lock for entire check-and-write sequence to prevent TOCTOU
+            with self._update_lock:
+                # Re-check whitelist INSIDE lock (prevents race condition)
+                if self.whitelist_manager.is_whitelisted(ip):
+                    self.logger.error(f"ERROR: Cannot blacklist {safe_ip} - it's in whitelist")
+                    self.logger.debug(f"add_manual_ip: Failed - IP {safe_ip} is whitelisted")
+                    return False
+
+                # Both write operations under lock for atomicity
+                self._add_to_manual_blacklist(ip_str, investigation)
+                self._add_to_main_blacklists({ip_str: investigation})
+
+            # Log investigation AFTER successful write (outside lock)
+            self.investigator.format_investigation_log(ip_str, investigation)
+            self.logger.debug(f"add_manual_ip: Successfully added {safe_ip}")
             return True
 
         except ValueError:
-            self.logger.error(f"ERROR: Invalid IP address: {ip_str}")
-            self.logger.debug(f"add_manual_ip: Failed - Invalid IP format: {ip_str}")
+            # SECURITY FIX H5: Use sanitized IP in error logs
+            self.logger.error(f"ERROR: Invalid IP address: {safe_ip}")
+            self.logger.debug(f"add_manual_ip: Failed - Invalid IP format: {safe_ip}")
             return False
 
     def remove_ip(self, ip_str: str) -> bool:
@@ -227,7 +276,9 @@ class BlacklistManager:
         Returns:
             True if successful, False if invalid IP or not found
         """
-        self.logger.debug(f"remove_ip: Removing {ip_str}")
+        # SECURITY FIX H5: Sanitize IP for logging
+        safe_ip = _sanitize_ip_for_logging(ip_str)
+        self.logger.debug(f"remove_ip: Removing {safe_ip}")
         try:
             ip = ipaddress.ip_address(ip_str)
 
@@ -255,27 +306,30 @@ class BlacklistManager:
                             'ipv4': ipv4_set,
                             'ipv6': ipv6_set
                         })
-                        self.logger.info(f"Removed {ip_str} from NFTables")
+                        self.logger.info(f"Removed {safe_ip} from NFTables")
 
                     except Exception as e:
-                        self.logger.error(f"NFTables removal failed for {ip_str}: {e}")
-                        raise RuntimeError(f"Cannot remove {ip_str}: NFTables update failed") from e
+                        # SECURITY FIX H5: Use sanitized IP in error logs
+                        self.logger.error(f"NFTables removal failed for {safe_ip}: {e}")
+                        raise RuntimeError(f"Cannot remove {safe_ip}: NFTables update failed") from e
 
                 # Phase 2: Remove from storage (only if NFTables succeeded or disabled)
                 success = self.writer.remove_ip(ip_str)
 
                 if success:
-                    self.logger.info(f"Successfully removed {ip_str} from blacklist storage")
-                    self.logger.debug(f"remove_ip: Successfully removed {ip_str}")
+                    self.logger.info(f"Successfully removed {safe_ip} from blacklist storage")
+                    self.logger.debug(f"remove_ip: Successfully removed {safe_ip}")
                     return True
                 else:
-                    self.logger.warning(f"IP {ip_str} was not in blacklist storage")
-                    self.logger.debug(f"remove_ip: IP {ip_str} not found in storage")
+                    # SECURITY FIX H5: Use sanitized IP in logs
+                    self.logger.warning(f"IP {safe_ip} was not in blacklist storage")
+                    self.logger.debug(f"remove_ip: IP {safe_ip} not found in storage")
                     return False
 
         except ValueError:
-            self.logger.error(f"ERROR: Invalid IP address: {ip_str}")
-            self.logger.debug(f"remove_ip: Failed - Invalid IP format: {ip_str}")
+            # SECURITY FIX H5: Use sanitized IP in error logs
+            self.logger.error(f"ERROR: Invalid IP address: {safe_ip}")
+            self.logger.debug(f"remove_ip: Failed - Invalid IP format: {safe_ip}")
             return False
 
     def sync_from_nftables(self, sync_to_nftables: bool = False, 
@@ -351,7 +405,9 @@ class BlacklistManager:
                 try:
                     ip_obj = ipaddress.ip_address(ip_str)
                 except ValueError:
-                    self.logger.warning(f"Invalid IP in metadata update: {ip_str}")
+                    # SECURITY FIX H5: Sanitize IP in warning logs
+                    safe_ip = _sanitize_ip_for_logging(ip_str)
+                    self.logger.warning(f"Invalid IP in metadata update: {safe_ip}")
                     continue
             
             if ip_obj.version == 4:
@@ -534,12 +590,15 @@ class BlacklistManager:
         Convert DetectionResult objects to blacklist entry format.
 
         Extracts and structures all metadata from detections for storage.
-        Filters out whitelisted IPs before preparation.
+        SECURITY FIX H4: Whitelist filtering moved inside lock in _update_blacklist_file()
+        to prevent TOCTOU where IP gets whitelisted between check and write.
         NOW INCLUDES: Guaranteed timestamps + event_types extraction
         SECURITY FIX C6: Validates event counts to prevent integer overflow attacks
         """
         now = datetime.now()
 
+        # SECURITY FIX H4: Don't filter whitelist here (TOCTOU vulnerability).
+        # Whitelist filtering is done atomically inside _update_blacklist_file() lock.
         return {
             str(d.ip): {
                 'ip': d.ip,
@@ -554,7 +613,7 @@ class BlacklistManager:
                 'source': 'automatic',
                 'event_types': list(set(e.event_type.value for e in d.source_events)) if d.source_events else []
             }
-            for d in detections if not self.whitelist_manager.is_whitelisted(d.ip)
+            for d in detections
         }
     
     def _update_blacklist_file(self, filename: str, new_ips_info: Dict, replace: bool = False):
@@ -684,7 +743,9 @@ class BlacklistManager:
                     filtered[ip_str] = info
                 else:
                     filtered_count += 1
-                    self.logger.debug(f"_filter_whitelisted_ips: Skipped whitelisted IP {ip_str}")
+                    # SECURITY FIX H5: Sanitize IP in debug logs
+                    safe_ip = _sanitize_ip_for_logging(ip_str)
+                    self.logger.debug(f"_filter_whitelisted_ips: Skipped whitelisted IP {safe_ip}")
             except ValueError:
                 continue
         self.logger.debug(f"_filter_whitelisted_ips: Filtered {filtered_count} whitelisted IP(s), {len(filtered)} remaining")
@@ -713,33 +774,43 @@ class BlacklistManager:
         self._write_manual_blacklist(manual_path, entries)
     
     def _write_manual_blacklist(self, path: Path, entries: Dict):
-        """Write manual blacklist file with enhanced formatting and timestamps."""
+        """
+        Write manual blacklist file with enhanced formatting and timestamps.
+
+        SECURITY FIX H5: Sanitizes all IP addresses before writing to prevent
+        file injection attacks via malicious IP strings.
+        """
         with open(path, 'w') as f:
             f.write(f"# Enhanced Manual Blacklist - Updated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("#" + "="*100 + "\n")
-            
+
             for ip_str, info in sorted(entries.items()):
+                # SECURITY FIX H5: Sanitize IP before writing to file
+                # Prevents log injection via newlines, control chars in IP string
+                safe_ip = _sanitize_ip_for_logging(ip_str)
+
                 geo = info.get('geolocation', {})
                 country = geo.get('country', 'Unknown') if geo else 'Unknown'
                 isp = geo.get('isp', 'Unknown ISP') if geo else 'Unknown ISP'
                 city = geo.get('city', '') if geo else ''
                 location = f"{country}, {city}" if city else country
-                
+
                 # Format timestamps
                 first_seen = info.get('first_seen', datetime.now())
                 last_seen = info.get('last_seen', datetime.now())
                 date_added = info.get('date_added', datetime.now())
-                
+
                 first_str = first_seen.strftime('%Y-%m-%d %H:%M') if isinstance(first_seen, datetime) else 'Unknown'
                 last_str = last_seen.strftime('%Y-%m-%d %H:%M') if isinstance(last_seen, datetime) else 'Unknown'
                 added_str = date_added.strftime('%Y-%m-%d %H:%M') if isinstance(date_added, datetime) else 'Unknown'
-                
-                f.write(f"# IP: {ip_str} | {location} | {isp} | ")
+
+                # SECURITY FIX H5: Use sanitized IP in file writes
+                f.write(f"# IP: {safe_ip} | {location} | {isp} | ")
                 f.write(f"Reason: {info.get('reason', 'Unknown')} | ")
                 f.write(f"Confidence: {info.get('confidence', 'unknown')} | ")
                 f.write(f"Events: {info.get('event_count', 0)} | ")
                 f.write(f"First: {first_str} | Last: {last_str} | Added: {added_str}\n")
-                f.write(f"{ip_str}\n")
+                f.write(f"{safe_ip}\n")
     
     def _add_to_main_blacklists(self, new_ips_info: Dict):
         """Distribute IPs to appropriate IPv4/IPv6 blacklist files."""
@@ -752,19 +823,27 @@ class BlacklistManager:
             self._update_blacklist_file(self.config.blacklist_ipv6_file, ipv6)
     
     def _log_new_ips(self, new_ips_info: Dict):
-        """Log newly blocked IPs with geolocation context."""
+        """
+        Log newly blocked IPs with geolocation context.
+
+        SECURITY FIX H5: Sanitizes IP addresses before logging to prevent
+        log injection attacks.
+        """
         for ip_str, info in new_ips_info.items():
+            # SECURITY FIX H5: Sanitize IP for logging
+            safe_ip = _sanitize_ip_for_logging(ip_str)
+
             geo = info.get('geolocation', {})
             location = f"{geo.get('country', 'Unknown')} ({geo.get('isp', 'Unknown ISP')})" if geo else "Unknown"
-            
+
             # Format timestamps for logging
             first_seen = info.get('first_seen')
             last_seen = info.get('last_seen')
             first_str = first_seen.strftime('%Y-%m-%d %H:%M') if isinstance(first_seen, datetime) else 'Unknown'
             last_str = last_seen.strftime('%Y-%m-%d %H:%M') if isinstance(last_seen, datetime) else 'Unknown'
-            
+
             self.logger.warning(
-                f"Blocking {ip_str} - {info['reason']} - {location} "
+                f"Blocking {safe_ip} - {info['reason']} - {location} "
                 f"(First: {first_str}, Last: {last_str})"
             )
     

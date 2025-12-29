@@ -7,9 +7,9 @@
 ```bash
 # On server
 cd ~
-wget https://github.com/n0tjohnny/tribanft/archive/v2.9.0.tar.gz
-tar -xzf v2.9.0.tar.gz
-cd tribanft-2.9.0
+wget https://github.com/n0tjohnny/tribanft/archive/v2.9.4.tar.gz
+tar -xzf v2.9.4.tar.gz
+cd tribanft-2.9.4
 ./install.sh
 ```
 

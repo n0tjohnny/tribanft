@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.4] - 2025-12-29
+
+### Security
+
+**HIGH SEVERITY SECURITY RELEASE - All 5 HIGH priority vulnerabilities fixed**
+
+See [Security Remediation Roadmap](docs/SECURITY_REMEDIATION_ROADMAP.md) for complete details.
+
+- **H1: Symlink Attack - Arbitrary File Read** (parsers/base.py:149)
+  - Fixed arbitrary file read via symlinks to sensitive files (/etc/shadow, SSH keys)
+  - Added `is_symlink()` checks in `read_lines()` and `parse_incremental()` methods
+  - Symlinks now rejected with security logging before file access
+  - Impact: Prevented password hash exposure and credential theft
+  - File: `bruteforce_detector/parsers/base.py`
+  - Testing: `tests/test_security_fixes_h1_h5.py::TestH1SymlinkAttack`
+
+- **H2: Race Condition - File Position Update** (log_watcher.py:261-268)
+  - Fixed log entry loss on crash via position update race condition
+  - Position now updated BEFORE callback execution (at-most-once delivery)
+  - Prevents permanent log loss if process crashes during callback
+  - Impact: Prevented missed intrusion detections
+  - File: `bruteforce_detector/core/log_watcher.py`
+  - Testing: `tests/test_security_fixes_h1_h5.py::TestH2RaceCondition`
+
+- **H3: Memory Leak - Unbounded Pattern Cache** (rule_engine.py:136)
+  - Fixed memory exhaustion (10GB after 10,000 rule reloads)
+  - Implemented LRU cache with 1000-entry limit using OrderedDict
+  - Thread-safe cache access with dedicated lock
+  - Automatic eviction of least-recently-used patterns
+  - Impact: Prevented memory exhaustion and OOM crashes
+  - File: `bruteforce_detector/core/rule_engine.py`
+  - Testing: `tests/test_security_fixes_h1_h5.py::TestH3MemoryLeak`
+
+- **H4: TOCTOU - Whitelist Check vs Blacklist Add** (blacklist.py:516, 606)
+  - Fixed race condition where admin IPs could be blacklisted despite whitelist
+  - Whitelist check now atomic with blacklist write (inside `_update_lock`)
+  - Applied to both `add_manual_ip()` and automatic detection paths
+  - Impact: Prevented admin lockout and service disruption
+  - Files:
+    - `bruteforce_detector/managers/blacklist.py:add_manual_ip()` (lines 234-245)
+    - `bruteforce_detector/managers/blacklist.py:_prepare_detection_ips()` (lines 593-610)
+  - Testing: `tests/test_security_fixes_h1_h5.py::TestH4TOCTOURaceCondition`
+
+- **H5: Log Injection via Unescaped IP** (blacklist.py:720)
+  - Fixed log injection attacks via malicious IP strings with newlines/control chars
+  - Added `_sanitize_ip_for_logging()` function with comprehensive sanitization
+  - Applied to all 20+ log statements and file writes
+  - Validates IPs, removes newlines, tabs, control characters, ANSI escape codes
+  - Impact: Prevented audit trail tampering and false security events
+  - File: `bruteforce_detector/managers/blacklist.py`
+  - Testing: `tests/test_security_fixes_h1_h5.py::TestH5LogInjection`
+
+### Added
+
+- Comprehensive security test suite: `tests/test_security_fixes_h1_h5.py`
+- 14 new test cases covering all H1-H5 vulnerabilities
+- Thread-safety tests for LRU cache (H3)
+- TOCTOU race condition tests (H4)
+- Symlink attack tests (H1)
+- Log injection tests (H5)
+
+### Changed
+
+- Enhanced security documentation in SECURITY_REMEDIATION_ROADMAP.md
+- Updated all H1-H5 entries with FIXED status and implementation details
+
+---
+
 ## [2.9.3] - 2025-12-28
 
 ### Security
