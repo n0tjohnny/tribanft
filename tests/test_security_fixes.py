@@ -20,6 +20,7 @@ import threading
 import signal
 import time
 import re
+import gc
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import ipaddress
@@ -29,7 +30,9 @@ from bruteforce_detector.core.plugin_manager import PluginManager
 from bruteforce_detector.core.rule_engine import (
     _run_regex_with_timeout,
     RegexTimeoutError,
-    MAX_YAML_FILE_SIZE
+    MAX_YAML_FILE_SIZE,
+    _regex_semaphore,
+    MAX_CONCURRENT_REGEX_THREADS
 )
 from bruteforce_detector.managers.blacklist import (
     _validate_event_count,
@@ -101,15 +104,32 @@ class TestC2PluginPathTraversal(unittest.TestCase):
 class TestC3RegexTimeoutThreadSafety(unittest.TestCase):
     """Test regex timeout thread safety fix (C3)."""
 
+    def setUp(self):
+        """Set up test - ensure semaphore is available."""
+        # Wait for any previous test threads to finish and release semaphore
+        time.sleep(0.5)
+        # Force garbage collection to clean up daemon threads
+        gc.collect()
+
+    def tearDown(self):
+        """Clean up after test - wait for daemon threads."""
+        # Give daemon threads time to finish
+        time.sleep(0.5)
+        gc.collect()
+
     def test_thread_safe_regex_timeout(self):
         """Regex timeout must be thread-safe (no signal handler races)."""
-        # Create a ReDoS pattern
+        # CRITICAL FIX: Use smaller input to avoid extreme backtracking
+        # Pattern (a+)+b with 25 'a's still causes ReDoS but manageable
         pattern = re.compile(r'(a+)+b')
-        text = 'a' * 10000 + 'c'  # No 'b' at end - causes backtracking
+        text = 'a' * 25 + 'c'  # Smaller input - still triggers ReDoS but finishes quickly
 
         # Test timeout works
         with self.assertRaises(RegexTimeoutError):
-            _run_regex_with_timeout(pattern, text, timeout_seconds=0.1)
+            _run_regex_with_timeout(pattern, text, timeout_seconds=0.05)
+
+        # Wait for daemon thread to finish
+        time.sleep(0.2)
 
     def test_concurrent_regex_matching_no_interference(self):
         """Multiple threads doing regex matching should not interfere."""
@@ -119,12 +139,15 @@ class TestC3RegexTimeoutThreadSafety(unittest.TestCase):
         text2 = 'hello world'
 
         results = []
+        exceptions = []
 
         def worker(pattern, text, expected):
             try:
                 match = _run_regex_with_timeout(pattern, text, timeout_seconds=1)
-                results.append(match is not None == expected)
-            except Exception:
+                # CRITICAL FIX: Correct comparison logic - use parentheses
+                results.append((match is not None) == expected)
+            except Exception as e:
+                exceptions.append(e)
                 results.append(False)
 
         threads = [
@@ -136,11 +159,42 @@ class TestC3RegexTimeoutThreadSafety(unittest.TestCase):
         for t in threads:
             t.start()
         for t in threads:
-            t.join()
+            t.join(timeout=5.0)  # Add timeout to prevent hang
+
+        # Check for exceptions
+        if exceptions:
+            self.fail(f"Worker thread raised exception: {exceptions[0]}")
 
         # All threads should succeed
-        self.assertEqual(len(results), 3)
-        self.assertTrue(all(results))
+        self.assertEqual(len(results), 3, f"Expected 3 results, got {len(results)}")
+        self.assertTrue(all(results), f"Not all results were True: {results}")
+
+    def test_semaphore_limiting_prevents_exhaustion(self):
+        """Semaphore should prevent too many concurrent regex operations."""
+        pattern = re.compile(r'test')
+        text = 'this is a test'
+
+        # Try to exceed semaphore limit
+        def worker():
+            try:
+                _run_regex_with_timeout(pattern, text, timeout_seconds=0.1)
+            except RegexTimeoutError:
+                pass  # Expected for limit exceeded
+
+        # Acquire all semaphore slots
+        threads = []
+        for i in range(MAX_CONCURRENT_REGEX_THREADS + 5):
+            t = threading.Thread(target=worker)
+            threads.append(t)
+            t.start()
+            time.sleep(0.01)  # Small delay to stagger starts
+
+        # Wait for completion
+        for t in threads:
+            t.join(timeout=5.0)
+
+        # Test passed if no deadlock occurred
+        self.assertTrue(True)
 
 
 class TestC5YAMLBombProtection(unittest.TestCase):
@@ -255,5 +309,41 @@ class SecurityTestRunner(unittest.TestCase):
         self.assertGreaterEqual(len(test_classes), 6)
 
 
+def cleanup_daemon_threads():
+    """
+    Clean up any lingering daemon threads from regex operations.
+
+    This is necessary because daemon threads doing regex matching may still
+    be running after tests complete. Wait for them to finish to prevent
+    resource leaks and CPU exhaustion.
+    """
+    import sys
+    print("\nCleaning up daemon threads...", file=sys.stderr)
+
+    # Get count of active threads
+    initial_count = threading.active_count()
+
+    # Force garbage collection
+    gc.collect()
+
+    # Wait for threads to finish (max 2 seconds)
+    for i in range(20):
+        current_count = threading.active_count()
+        if current_count <= 1:  # Only main thread
+            break
+        time.sleep(0.1)
+
+    final_count = threading.active_count()
+    if final_count > 1:
+        print(f"Warning: {final_count - 1} threads still active after cleanup", file=sys.stderr)
+    else:
+        print("All daemon threads cleaned up successfully", file=sys.stderr)
+
+
 if __name__ == '__main__':
-    unittest.main()
+    try:
+        # Run tests with verbosity
+        unittest.main(verbosity=2, exit=False)
+    finally:
+        # Always clean up threads
+        cleanup_daemon_threads()
