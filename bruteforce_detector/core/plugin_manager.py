@@ -116,10 +116,30 @@ class PluginManager:
 
         self.logger.info(f"Discovering plugins in {plugin_dir}")
 
+        # SECURITY FIX C2: Resolve plugin directory to absolute path for traversal checking
+        plugin_dir_abs = plugin_dir.resolve()
+
         # Scan Python files in plugin directory
         for py_file in plugin_dir.glob("*.py"):
             if py_file.name.startswith("_"):
                 continue  # Skip __init__.py and private modules
+
+            # SECURITY FIX C2: Validate no path traversal (prevents ../../../../tmp/shell.py)
+            py_file_abs = py_file.resolve()
+            try:
+                py_file_abs.relative_to(plugin_dir_abs)
+            except ValueError:
+                self.logger.error(
+                    f"SECURITY: Path traversal attempt detected in plugin: {py_file}"
+                )
+                self.logger.error(
+                    f"  Plugin path: {py_file_abs}"
+                )
+                self.logger.error(
+                    f"  Expected directory: {plugin_dir_abs}"
+                )
+                self.logger.error("  REJECTING malicious plugin")
+                continue  # Skip this file - path traversal detected
 
             try:
                 # Build module name for import

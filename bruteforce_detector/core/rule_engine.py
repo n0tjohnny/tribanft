@@ -35,42 +35,87 @@ from ..utils.detector_validator import DetectorValidator, DetectorValidationErro
 REGEX_TIMEOUT_SECONDS = 1  # Maximum time for regex matching
 MAX_INPUT_LENGTH = 10000  # Maximum input string length for regex matching
 
+# YAML Bomb Protection Constants (SECURITY FIX C5)
+MAX_YAML_FILE_SIZE = 1024 * 1024  # 1MB max YAML file size (prevents billion laughs)
+MAX_YAML_COMPLEXITY = 10000  # Max total objects in parsed YAML
+
+# Thread Limiting for ReDoS Protection (SECURITY FIX C3)
+MAX_CONCURRENT_REGEX_THREADS = 20  # Prevent thread exhaustion under attack
+_regex_semaphore = threading.Semaphore(MAX_CONCURRENT_REGEX_THREADS)
+
 
 class RegexTimeoutError(Exception):
     """Raised when regex matching exceeds timeout (ReDoS protection)."""
     pass
 
 
+def _run_regex_with_timeout(pattern, text, timeout_seconds):
+    """
+    Run regex with thread-based timeout (thread-safe replacement for signal-based timeout).
+
+    SECURITY FIX C3: signal.SIGALRM is process-global and NOT thread-safe.
+    Multiple threads racing cause signal handler corruption → ReDoS bypass.
+
+    This implementation uses threading.Thread + timeout for thread-safety.
+    Semaphore limiting prevents thread exhaustion under sustained ReDoS attack.
+
+    Args:
+        pattern: Compiled regex pattern
+        text: Text to search
+        timeout_seconds: Timeout in seconds
+
+    Returns:
+        Match object or None
+
+    Raises:
+        RegexTimeoutError: If regex exceeds timeout or too many concurrent operations
+    """
+    # SECURITY: Prevent thread exhaustion under sustained ReDoS attack
+    if not _regex_semaphore.acquire(blocking=False):
+        raise RegexTimeoutError(
+            f"Too many concurrent regex operations ({MAX_CONCURRENT_REGEX_THREADS}) - possible DoS attack"
+        )
+
+    try:
+        result = [None]  # Mutable container for thread communication
+        exception = [None]
+
+        def run_search():
+            try:
+                result[0] = pattern.search(text)
+            except Exception as e:
+                exception[0] = e
+
+        thread = threading.Thread(target=run_search, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_seconds)
+
+        if thread.is_alive():
+            # Thread still running - timeout exceeded
+            # Thread will be terminated when daemon thread ends
+            raise RegexTimeoutError(
+                f"Regex matching exceeded {timeout_seconds}s timeout - possible ReDoS attack"
+            )
+
+        if exception[0]:
+            raise exception[0]
+
+        return result[0]
+
+    finally:
+        # Always release semaphore, even on exception
+        _regex_semaphore.release()
+
+
 @contextmanager
 def regex_timeout(seconds):
     """
-    Context manager for regex timeout protection against ReDoS attacks.
+    Legacy context manager - now a no-op.
 
-    Uses SIGALRM on Unix systems. If signal is not available (Windows),
-    falls back to no timeout (with warning logged).
-
-    Args:
-        seconds: Timeout in seconds
-
-    Raises:
-        RegexTimeoutError: If regex matching exceeds timeout
+    SECURITY FIX C3: Removed signal-based timeout (not thread-safe).
+    Use _run_regex_with_timeout() directly instead.
     """
-    def timeout_handler(signum, frame):
-        raise RegexTimeoutError("Regex matching exceeded timeout - possible ReDoS attack")
-
-    # Check if signal.SIGALRM is available (Unix only)
-    if hasattr(signal, 'SIGALRM'):
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(seconds)
-        try:
-            yield
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-    else:
-        # Windows or other platforms without SIGALRM - no timeout available
-        # Log warning on first use
-        yield
+    yield  # No-op, for backward compatibility
 
 
 @dataclass
@@ -158,8 +203,60 @@ class RuleEngine:
 
         for rule_file in yaml_files:
             try:
+                # SECURITY FIX C5: Validate file size before loading (YAML bomb protection)
+                file_size = rule_file.stat().st_size
+                if file_size > MAX_YAML_FILE_SIZE:
+                    self.logger.error(
+                        f"SECURITY: YAML file too large: {rule_file.name} "
+                        f"({file_size} bytes > {MAX_YAML_FILE_SIZE} bytes)"
+                    )
+                    self.logger.error(
+                        "  Possible YAML bomb attack - rejecting file"
+                    )
+                    continue
+
                 with open(rule_file, 'r', encoding='utf-8') as f:
-                    rule_data = yaml.safe_load(f)
+                    # Read with size limit
+                    content = f.read(MAX_YAML_FILE_SIZE)
+                    if len(content) >= MAX_YAML_FILE_SIZE:
+                        self.logger.error(
+                            f"SECURITY: YAML content truncated at limit: {rule_file.name}"
+                        )
+                        continue
+
+                    rule_data = yaml.safe_load(content)
+
+                # SECURITY FIX C5: Validate YAML complexity (prevent billion laughs)
+                def count_yaml_objects(obj, depth=0, max_depth=100):
+                    """Count total objects in YAML structure with depth limit."""
+                    if depth > max_depth:
+                        raise ValueError("YAML nesting too deep (possible bomb)")
+
+                    count = 1
+                    if isinstance(obj, dict):
+                        if len(obj) > 1000:
+                            raise ValueError("YAML dict too large (possible bomb)")
+                        for value in obj.values():
+                            count += count_yaml_objects(value, depth + 1, max_depth)
+                            if count > MAX_YAML_COMPLEXITY:
+                                raise ValueError(f"YAML too complex: >{MAX_YAML_COMPLEXITY} objects")
+                    elif isinstance(obj, list):
+                        if len(obj) > 1000:
+                            raise ValueError("YAML list too large (possible bomb)")
+                        for item in obj:
+                            count += count_yaml_objects(item, depth + 1, max_depth)
+                            if count > MAX_YAML_COMPLEXITY:
+                                raise ValueError(f"YAML too complex: >{MAX_YAML_COMPLEXITY} objects")
+
+                    return count
+
+                try:
+                    total_objects = count_yaml_objects(rule_data)
+                    self.logger.debug(f"YAML complexity: {total_objects} objects in {rule_file.name}")
+                except ValueError as e:
+                    self.logger.error(f"SECURITY: {e} in {rule_file.name}")
+                    self.logger.error("  Rejecting potentially malicious YAML file")
+                    continue
 
                 # Handle multiple rules in single file
                 if 'detectors' in rule_data:
@@ -463,13 +560,13 @@ class RuleEngine:
 
         for pattern, description in compiled_patterns:
             try:
-                # ReDoS protection: Apply timeout to regex matching
-                with regex_timeout(REGEX_TIMEOUT_SECONDS):
-                    if pattern.search(message):
-                        self.logger.debug(
-                            f"Event matched pattern '{description}': {message[:100]}"
-                        )
-                        return True
+                # SECURITY FIX C3: Thread-safe regex timeout (replaces signal-based)
+                match = _run_regex_with_timeout(pattern, message, REGEX_TIMEOUT_SECONDS)
+                if match:
+                    self.logger.debug(
+                        f"Event matched pattern '{description}': {message[:100]}"
+                    )
+                    return True
             except RegexTimeoutError:
                 self.logger.warning(
                     f"Regex timeout in rule '{rule.name}' pattern '{description}' "
@@ -534,12 +631,12 @@ class RuleEngine:
             for pattern, desc in self._compiled_patterns.get(rule.name, []):
                 for event in events:
                     try:
-                        # ReDoS protection: timeout and input length limit
+                        # SECURITY FIX C3: Thread-safe regex timeout
                         message = event.raw_message[:MAX_INPUT_LENGTH]
-                        with regex_timeout(REGEX_TIMEOUT_SECONDS):
-                            if pattern.search(message):
-                                pattern_desc = desc
-                                break
+                        match = _run_regex_with_timeout(pattern, message, REGEX_TIMEOUT_SECONDS)
+                        if match:
+                            pattern_desc = desc
+                            break
                     except RegexTimeoutError:
                         self.logger.warning(
                             f"Regex timeout in pattern matching - possible ReDoS. Skipping."

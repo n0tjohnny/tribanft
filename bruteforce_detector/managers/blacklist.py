@@ -39,6 +39,46 @@ from .blacklist_adapter import BlacklistAdapter
 from .ip_investigator import IPInvestigator
 
 
+# SECURITY FIX C6: Event count validation constants
+MIN_EVENT_COUNT = 0  # Minimum valid event count (reject negative)
+MAX_EVENT_COUNT = 1000000  # Maximum valid event count (prevent memory exhaustion)
+
+
+def _validate_event_count(count: int, source: str = "unknown") -> int:
+    """
+    Validate event count is within safe bounds (SECURITY FIX C6).
+
+    Python arbitrary-precision ints can cause memory exhaustion if unbounded.
+    Malicious plugins could inject negative or huge counts.
+
+    Args:
+        count: Event count to validate
+        source: Source of the count (for logging)
+
+    Returns:
+        Validated count (clamped to safe range)
+    """
+    if not isinstance(count, int):
+        logging.getLogger(__name__).warning(
+            f"Invalid event_count type from {source}: {type(count)} - using 1"
+        )
+        return 1
+
+    if count < MIN_EVENT_COUNT:
+        logging.getLogger(__name__).warning(
+            f"Negative event_count from {source}: {count} - clamping to 0"
+        )
+        return MIN_EVENT_COUNT
+
+    if count > MAX_EVENT_COUNT:
+        logging.getLogger(__name__).error(
+            f"SECURITY: Excessive event_count from {source}: {count} - clamping to {MAX_EVENT_COUNT}"
+        )
+        return MAX_EVENT_COUNT
+
+    return count
+
+
 class BlacklistManager:
     """
     Central orchestrator for all blacklist operations.
@@ -492,19 +532,20 @@ class BlacklistManager:
     def _prepare_detection_ips(self, detections: List[DetectionResult]) -> Dict:
         """
         Convert DetectionResult objects to blacklist entry format.
-        
+
         Extracts and structures all metadata from detections for storage.
         Filters out whitelisted IPs before preparation.
         NOW INCLUDES: Guaranteed timestamps + event_types extraction
+        SECURITY FIX C6: Validates event counts to prevent integer overflow attacks
         """
         now = datetime.now()
-        
+
         return {
             str(d.ip): {
                 'ip': d.ip,
                 'reason': d.reason,
                 'confidence': d.confidence.value,
-                'event_count': d.event_count,
+                'event_count': _validate_event_count(d.event_count, f"detection:{d.ip}"),
                 'geolocation': d.geolocation,
                 'first_seen': d.first_seen or now,
                 'last_seen': d.last_seen or now,
@@ -575,13 +616,18 @@ class BlacklistManager:
                         # EVENT COUNT: Prevent double-increment when using database
                         # FIX #15: Database UPSERT already increments via "event_count = event_count + excluded.event_count"
                         # If we also increment here, counts grow exponentially (file layer + DB layer)
+                        # SECURITY FIX C6: Validate event counts
                         if self.config.use_database:
                             # Database mode: Pass only NEW event count for this detection
                             # Database UPSERT will handle accumulation: current + new
-                            existing_entry['event_count'] = new_info.get('event_count', 0)
+                            new_count = _validate_event_count(new_info.get('event_count', 0), f"update:{ip_str}")
+                            existing_entry['event_count'] = new_count
                         else:
                             # File-only mode: Must manually accumulate (no database to track)
-                            existing_entry['event_count'] = existing_entry.get('event_count', 0) + new_info.get('event_count', 0)
+                            current = _validate_event_count(existing_entry.get('event_count', 0), f"existing:{ip_str}")
+                            new = _validate_event_count(new_info.get('event_count', 0), f"new:{ip_str}")
+                            total = min(current + new, MAX_EVENT_COUNT)  # Prevent overflow on addition
+                            existing_entry['event_count'] = total
 
                         # Merge event_types (union of both sets)
                         existing_types = set(existing_entry.get('event_types', []))

@@ -153,9 +153,11 @@ class LogWatcher:
         # Initialize position
         if initial_offset is None:
             # Start from end of file (only process new entries)
+            # SECURITY FIX C4: Defensive error handling
             try:
                 initial_offset = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-            except OSError:
+            except (OSError, PermissionError) as e:
+                self.logger.warning(f"Cannot get file size for {file_path}: {e}")
                 initial_offset = 0
 
         self.positions[file_path] = initial_offset
@@ -244,7 +246,16 @@ class LogWatcher:
                     self.logger.warning(f"File disappeared: {file_path}")
                     return
 
-                current_size = os.path.getsize(file_path)
+                # SECURITY FIX C4: Defensive error handling for file operations
+                # Prevents exception propagation that could block cleanup
+                try:
+                    current_size = os.path.getsize(file_path)
+                except (OSError, PermissionError) as e:
+                    self.logger.error(
+                        f"Cannot access file size for {file_path}: {e}"
+                    )
+                    return
+
                 last_position = self.positions.get(file_path, 0)
 
                 # Detect file rotation (file size decreased)

@@ -27,6 +27,7 @@ import os
 import argparse
 import logging
 import signal
+import threading
 from typing import List
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -84,6 +85,11 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
 
         # CRITICAL FIX #35: Graceful shutdown flag for signal handlers
         self._shutdown_requested = False
+
+        # SECURITY FIX C1: Async-signal-safe flags for signal handlers
+        # Signal handlers must ONLY set flags, never modify complex state
+        self._whitelist_reload_requested = False
+        self._reload_lock = threading.Lock()
 
         try:
             # Initialize managers
@@ -192,13 +198,13 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
             SIGINT: Graceful shutdown (Ctrl+C)
         """
         def handle_sighup(signum, frame):
-            """Handle SIGHUP signal by reloading whitelist."""
-            self.logger.info("Received SIGHUP signal - reloading whitelist...")
-            try:
-                self.whitelist_manager.reload()
-                self.logger.info("✓ Whitelist reloaded successfully")
-            except Exception as e:
-                self.logger.error(f"Failed to reload whitelist: {e}")
+            """
+            Handle SIGHUP signal by setting reload flag (async-signal-safe).
+
+            SECURITY FIX C1: Signal handlers must only set flags, never modify
+            shared state directly. Actual reload happens in main thread.
+            """
+            self._whitelist_reload_requested = True
 
         def handle_shutdown(signum, frame):
             """Handle SIGTERM/SIGINT signal for graceful shutdown."""
@@ -227,6 +233,25 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
             signal.signal(signal.SIGINT, handle_shutdown)
             self.logger.info("✓ SIGINT signal handler registered (Ctrl+C shutdown)")
     
+    def _process_signal_flags(self):
+        """
+        Process signal handler flags in main thread (thread-safe).
+
+        SECURITY FIX C1: Signal handlers only set flags, this method
+        performs the actual work in a thread-safe manner.
+        """
+        if self._whitelist_reload_requested:
+            with self._reload_lock:
+                if self._whitelist_reload_requested:
+                    self.logger.info("Received SIGHUP signal - reloading whitelist...")
+                    try:
+                        self.whitelist_manager.reload()
+                        self.logger.info("Whitelist reloaded successfully")
+                    except Exception as e:
+                        self.logger.error(f"Failed to reload whitelist: {e}")
+                    finally:
+                        self._whitelist_reload_requested = False
+
     def run_detection(self) -> List[DetectionResult]:
         """
         Execute the complete detection cycle.
@@ -246,7 +271,10 @@ class BruteForceDetectorEngine(RealtimeDetectionMixin):
         self.logger.info("=" * 60)
         self.logger.info("Starting advanced brute force detection")
         self.logger.info("=" * 60)
-        
+
+        # SECURITY FIX C1: Process signal handler flags before detection cycle
+        self._process_signal_flags()
+
         # Get last processing state
         last_state = self.state_manager.get_state()
         since_timestamp = last_state.last_processed_timestamp if last_state else None

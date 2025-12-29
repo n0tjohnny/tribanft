@@ -141,11 +141,14 @@ class BlacklistDatabase:
         retry_delay = 0.1  # Start with 100ms
 
         for attempt in range(max_retries):
+            conn = None  # SECURITY FIX C7: Initialize to track cleanup
             try:
                 added = 0
 
-                # Use longer timeout with IMMEDIATE transaction for write lock
-                with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                # SECURITY FIX C7: Explicit connection management to prevent FD leaks
+                # Even with 'with' statement, ensure cleanup on retry paths
+                conn = sqlite3.connect(self.db_path, timeout=30.0)
+                with conn:
                     with self._query_timer(f"bulk_add({len(ips_info)} IPs)"):
                         # Begin IMMEDIATE transaction to acquire write lock immediately
                         self.logger.debug(f"bulk_add: Beginning IMMEDIATE transaction (attempt {attempt + 1})")
@@ -256,6 +259,15 @@ class BlacklistDatabase:
                     # Non-lock error or max retries exceeded
                     self.logger.error(f"ERROR: Database operation failed: {e}")
                     raise
+
+            finally:
+                # SECURITY FIX C7: Explicit connection cleanup on retry paths
+                # Ensures no FD leaks even if exception occurs between connect and with block
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass  # Already handling another exception
 
         # Should not reach here, but just in case
         raise sqlite3.OperationalError("Failed to complete bulk_add after all retries")

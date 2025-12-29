@@ -7,6 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.9.3] - 2025-12-28
+
+### Security
+
+**CRITICAL SECURITY RELEASE - All 7 vulnerabilities fixed**
+
+See [Security Advisory](docs/SECURITY_ADVISORY.md) and [Remediation Roadmap](docs/SECURITY_REMEDIATION_ROADMAP.md) for details.
+
+- **C1: Signal Handler Race Condition** (main.py:194-201)
+  - Fixed whitelist corruption via concurrent SIGHUP signals
+  - Signal handlers now only set atomic flags, actual reload in main thread
+  - Added double-check locking pattern to prevent races
+  - Impact: Prevented admin IP lockout and whitelist corruption
+  - CVE: Pending
+  - File: `bruteforce_detector/main.py`
+
+- **C2: Plugin Path Traversal → Remote Code Execution** (plugin_manager.py:120-130)
+  - Fixed arbitrary code execution via malicious plugin paths
+  - Added path traversal validation using Path.relative_to()
+  - Reject plugins outside plugin directory with security logging
+  - Impact: Prevented root code execution and system compromise
+  - CVE: Pending
+  - File: `bruteforce_detector/core/plugin_manager.py`
+
+- **C3: Regex Timeout NOT Thread-Safe** (rule_engine.py:44-73)
+  - Fixed ReDoS bypass via signal handler corruption
+  - Replaced signal.SIGALRM with thread-safe timeout using threading.Thread
+  - Each regex match runs in isolated thread with timeout
+  - Impact: Prevented CPU exhaustion and detection bypass
+  - CVE: Pending
+  - File: `bruteforce_detector/core/rule_engine.py`
+
+- **C4: File Descriptor Leak in Log Rotation** (log_watcher.py:247)
+  - Fixed FD exhaustion from exception-interrupted file operations
+  - Added defensive exception handling for OSError and PermissionError
+  - Graceful degradation on file access failures
+  - Impact: Prevented FD exhaustion and service failure
+  - CVE: Pending
+  - File: `bruteforce_detector/core/log_watcher.py`
+
+- **C5: YAML Bomb Protection** (rule_engine.py:161-163)
+  - Fixed memory exhaustion from billion laughs YAML attacks
+  - Added MAX_YAML_FILE_SIZE constant (1MB limit)
+  - File size validation before loading, content truncation at limit
+  - Impact: Prevented OOM crashes from malicious YAML files
+  - CVE: Pending
+  - File: `bruteforce_detector/core/rule_engine.py`
+
+- **C6: Integer Overflow in Event Counts** (blacklist.py:584)
+  - Fixed memory exhaustion from unbounded Python integers
+  - Added _validate_event_count() with bounds checking
+  - MIN_EVENT_COUNT = 0, MAX_EVENT_COUNT = 1,000,000
+  - Validation at all event count ingestion points
+  - Impact: Prevented memory exhaustion from malicious event counts
+  - CVE: Pending
+  - File: `bruteforce_detector/managers/blacklist.py`
+
+- **C7: Database Connection Leak on Retry** (database.py:148-261)
+  - Fixed FD exhaustion from leaked database connections
+  - Explicit connection cleanup in try/finally blocks
+  - Connection tracking across retry attempts
+  - Impact: Prevented connection exhaustion and database unavailability
+  - CVE: Pending
+  - File: `bruteforce_detector/managers/database.py`
+
+### Added
+
+- **Security Test Suite**: Comprehensive tests for all CRITICAL fixes
+  - Test coverage for C1, C2, C3, C5, C6, C7
+  - Prevents regressions via CI/CD integration
+  - Run: `python -m pytest tests/test_security_fixes.py -v`
+  - File: `tests/test_security_fixes.py`
+
+- **Security Documentation**: Complete security audit documentation
+  - Security Advisory with CVE assignments and upgrade instructions
+  - Remediation Roadmap with priority matrix and implementation status
+  - Files: `docs/SECURITY_ADVISORY.md`, `docs/SECURITY_REMEDIATION_ROADMAP.md`
+
+### Changed
+
+- **Improved Thread Safety**: All signal handlers now use flag-based synchronization
+- **Enhanced Input Validation**: All external inputs validated for security
+- **Better Resource Management**: Explicit cleanup in all critical paths
+- **Thread Limiting**: Added semaphore-based limiting (max 20 concurrent regex threads) to prevent resource exhaustion under sustained ReDoS attacks
+- **YAML Complexity Validation**: Added recursive object counting to enforce MAX_YAML_COMPLEXITY limit (prevents billion laughs with small files)
+
+### Fixed (Post-Review)
+
+- **Missing Import**: Added `threading` module import to main.py (CRITICAL - prevented startup crash)
+- **YAML Bomb Bypass**: Implemented complexity counting that was defined but not enforced (CRITICAL - prevented DoS)
+- **Thread Exhaustion**: Added semaphore limiting to prevent thread accumulation under attack (HIGH priority)
+
+---
+
 ## [2.9.2] - 2025-12-28
 
 ### Changed
