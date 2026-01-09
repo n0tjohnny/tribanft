@@ -1,4 +1,3 @@
-# tribanFT
 
 <p align="center">
   <img
