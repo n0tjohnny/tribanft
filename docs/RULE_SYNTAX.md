@@ -13,7 +13,7 @@ Complete reference for creating YAML-based detection rules.
 1. [Overview](#overview)
 2. [Rule File Format](#rule-file-format)
 3. [Metadata Section](#metadata-section)
-4. [Log Sources Section](#log-sources-section) (Phase 1)
+4. [Log Sources Section](#log-sources-section)
 5. [Detection Section](#detection-section)
 6. [Pattern Syntax](#pattern-syntax)
 7. [Aggregation Section](#aggregation-section)
